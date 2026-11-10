@@ -1,0 +1,30 @@
+{
+  "geral": {
+    "n": 22,
+    "acertos": 0,
+    "acuracia": 0.0,
+    "latencia_media_s": 0.0,
+    "custo_medio_usd": null
+  },
+  "facil": {
+    "n": 6,
+    "acertos": 0,
+    "acuracia": 0.0,
+    "latencia_media_s": 0.0,
+    "custo_medio_usd": null
+  },
+  "media": {
+    "n": 10,
+    "acertos": 0,
+    "acuracia": 0.0,
+    "latencia_media_s": 0.0,
+    "custo_medio_usd": null
+  },
+  "dificil": {
+    "n": 6,
+    "acertos": 0,
+    "acuracia": 0.0,
+    "latencia_media_s": 0.0,
+    "custo_medio_usd": null
+  }
+}

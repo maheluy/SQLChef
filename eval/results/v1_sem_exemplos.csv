@@ -1,0 +1,23 @@
+id,difficulty,correct,error,latency_s,cost_usd,input_tokens,output_tokens,generated_sql,question
+q01,facil,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,Quantos pedidos existem no total?
+q02,facil,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,Quantos pedidos foram cancelados?
+q03,facil,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,Quantos vendedores estão localizados no estado de SP?
+q04,facil,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,Qual é a nota média de todas as avaliações?
+q05,facil,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,Quais são os 3 tipos de pagamento mais usados? Retorne o tipo e a quantidade de pagamentos.
+q06,facil,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,Quantos clientes únicos existem?
+q07,media,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,Quantos pedidos com status 'delivered' foram entregues ao cliente depois da data estimada de entrega?
+q08,media,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,"Qual foi a receita total de itens (soma de price) em 2017, desconsiderando pedidos cancelados?"
+q09,media,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,Quais são os 5 estados com mais clientes únicos? Retorne o estado e a quantidade de clientes únicos.
+q10,media,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,"Qual é o ticket médio, ou seja, o valor médio total pago por pedido (somando todos os pagamentos de cada pedido)?"
+q11,media,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,Qual é a nota média das avaliações de pedidos feitos por clientes do estado de SP?
+q12,media,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,"Entre os pedidos com status 'delivered' que têm data de entrega ao cliente registrada, qual é o tempo médio, em dias, entre a compra e a entrega?"
+q13,media,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,"Quais são as 5 categorias de produto (nome em inglês) com mais itens vendidos, ignorando itens sem categoria? Retorne a categoria e a quantidade de itens."
+q14,media,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,"Entre os pedidos com status 'delivered' que têm data de entrega registrada, qual o percentual entregue depois da data estimada? Responda em escala de 0 a 100, com 2 casas decimais."
+q15,media,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,Quais são os 5 vendedores com maior receita (soma de price dos itens vendidos)? Retorne o seller_id e a receita.
+q16,media,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,"Qual foi o mês de 2017 (formato AAAA-MM) com mais pedidos, e quantos pedidos ele teve?"
+q17,dificil,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,"Considere apenas pedidos com status 'delivered' e data de entrega registrada. Entre os estados dos clientes com pelo menos 500 desses pedidos, quais são os 5 com maior percentual de pedidos entregues com atraso (depois da data estimada)? Retorne o estado e o percentual (escala 0 a 100, 2 casas decimais)."
+q18,dificil,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,"Em 2017, desconsiderando pedidos cancelados, qual foi a receita de itens (soma de price) de cada mês e a variação percentual em relação ao mês anterior? Retorne mês (AAAA-MM), receita e variação percentual (2 casas decimais), ordenado por mês. O primeiro mês não tem variação (NULL)."
+q19,dificil,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,Quantos clientes únicos (identificados por customer_unique_id) fizeram mais de um pedido?
+q20,dificil,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,"Considere pedidos com status 'delivered' e data de entrega registrada. Retorne uma linha com duas colunas: a nota média das avaliações dos pedidos entregues com atraso (depois da data estimada) e a nota média dos pedidos entregues no prazo, nessa ordem."
+q21,dificil,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,"Qual a categoria de produto (nome em inglês) com maior frete médio por item, considerando apenas categorias com pelo menos 100 itens vendidos e ignorando itens sem categoria? Retorne a categoria e o frete médio."
+q22,dificil,False,agente: NotImplementedError: Implemente o agente aqui,0.0,,,,,Quantos pedidos têm itens de mais de um vendedor diferente?

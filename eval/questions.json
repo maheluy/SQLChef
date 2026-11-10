@@ -1,0 +1,142 @@
+[
+  {
+    "id": "q01",
+    "difficulty": "facil",
+    "question": "Quantos pedidos existem no total?",
+    "gold_sql": "SELECT COUNT(*) FROM orders"
+  },
+  {
+    "id": "q02",
+    "difficulty": "facil",
+    "question": "Quantos pedidos foram cancelados?",
+    "gold_sql": "SELECT COUNT(*) FROM orders WHERE order_status = 'canceled'"
+  },
+  {
+    "id": "q03",
+    "difficulty": "facil",
+    "question": "Quantos vendedores estão localizados no estado de SP?",
+    "gold_sql": "SELECT COUNT(*) FROM sellers WHERE seller_state = 'SP'"
+  },
+  {
+    "id": "q04",
+    "difficulty": "facil",
+    "question": "Qual é a nota média de todas as avaliações?",
+    "gold_sql": "SELECT ROUND(AVG(review_score), 2) FROM order_reviews"
+  },
+  {
+    "id": "q05",
+    "difficulty": "facil",
+    "question": "Quais são os 3 tipos de pagamento mais usados? Retorne o tipo e a quantidade de pagamentos.",
+    "gold_sql": "SELECT payment_type, COUNT(*) FROM order_payments GROUP BY payment_type ORDER BY COUNT(*) DESC LIMIT 3",
+    "ordered": true
+  },
+  {
+    "id": "q06",
+    "difficulty": "facil",
+    "question": "Quantos clientes únicos existem?",
+    "gold_sql": "SELECT COUNT(DISTINCT customer_unique_id) FROM customers"
+  },
+  {
+    "id": "q07",
+    "difficulty": "media",
+    "question": "Quantos pedidos com status 'delivered' foram entregues ao cliente depois da data estimada de entrega?",
+    "gold_sql": "SELECT COUNT(*) FROM orders WHERE order_status = 'delivered' AND order_delivered_customer_date > order_estimated_delivery_date"
+  },
+  {
+    "id": "q08",
+    "difficulty": "media",
+    "question": "Qual foi a receita total de itens (soma de price) em 2017, desconsiderando pedidos cancelados?",
+    "gold_sql": "SELECT ROUND(SUM(oi.price), 2) FROM order_items oi JOIN orders o ON o.order_id = oi.order_id WHERE o.order_status <> 'canceled' AND strftime('%Y', o.order_purchase_timestamp) = '2017'"
+  },
+  {
+    "id": "q09",
+    "difficulty": "media",
+    "question": "Quais são os 5 estados com mais clientes únicos? Retorne o estado e a quantidade de clientes únicos.",
+    "gold_sql": "SELECT customer_state, COUNT(DISTINCT customer_unique_id) FROM customers GROUP BY customer_state ORDER BY COUNT(DISTINCT customer_unique_id) DESC LIMIT 5",
+    "ordered": true
+  },
+  {
+    "id": "q10",
+    "difficulty": "media",
+    "question": "Qual é o ticket médio, ou seja, o valor médio total pago por pedido (somando todos os pagamentos de cada pedido)?",
+    "gold_sql": "SELECT ROUND(AVG(total), 2) FROM (SELECT order_id, SUM(payment_value) AS total FROM order_payments GROUP BY order_id)"
+  },
+  {
+    "id": "q11",
+    "difficulty": "media",
+    "question": "Qual é a nota média das avaliações de pedidos feitos por clientes do estado de SP?",
+    "gold_sql": "SELECT ROUND(AVG(r.review_score), 2) FROM order_reviews r JOIN orders o ON o.order_id = r.order_id JOIN customers c ON c.customer_id = o.customer_id WHERE c.customer_state = 'SP'"
+  },
+  {
+    "id": "q12",
+    "difficulty": "media",
+    "question": "Entre os pedidos com status 'delivered' que têm data de entrega ao cliente registrada, qual é o tempo médio, em dias, entre a compra e a entrega?",
+    "gold_sql": "SELECT ROUND(AVG(julianday(order_delivered_customer_date) - julianday(order_purchase_timestamp)), 2) FROM orders WHERE order_status = 'delivered' AND order_delivered_customer_date IS NOT NULL"
+  },
+  {
+    "id": "q13",
+    "difficulty": "media",
+    "question": "Quais são as 5 categorias de produto (nome em inglês) com mais itens vendidos, ignorando itens sem categoria? Retorne a categoria e a quantidade de itens.",
+    "gold_sql": "SELECT p.product_category_name_english, COUNT(*) FROM order_items oi JOIN products p ON p.product_id = oi.product_id WHERE p.product_category_name_english IS NOT NULL GROUP BY p.product_category_name_english ORDER BY COUNT(*) DESC LIMIT 5",
+    "ordered": true
+  },
+  {
+    "id": "q14",
+    "difficulty": "media",
+    "question": "Entre os pedidos com status 'delivered' que têm data de entrega registrada, qual o percentual entregue depois da data estimada? Responda em escala de 0 a 100, com 2 casas decimais.",
+    "gold_sql": "SELECT ROUND(100.0 * SUM(CASE WHEN order_delivered_customer_date > order_estimated_delivery_date THEN 1 ELSE 0 END) / COUNT(*), 2) FROM orders WHERE order_status = 'delivered' AND order_delivered_customer_date IS NOT NULL"
+  },
+  {
+    "id": "q15",
+    "difficulty": "media",
+    "question": "Quais são os 5 vendedores com maior receita (soma de price dos itens vendidos)? Retorne o seller_id e a receita.",
+    "gold_sql": "SELECT seller_id, ROUND(SUM(price), 2) AS receita FROM order_items GROUP BY seller_id ORDER BY SUM(price) DESC LIMIT 5",
+    "ordered": true
+  },
+  {
+    "id": "q16",
+    "difficulty": "media",
+    "question": "Qual foi o mês de 2017 (formato AAAA-MM) com mais pedidos, e quantos pedidos ele teve?",
+    "gold_sql": "SELECT strftime('%Y-%m', order_purchase_timestamp) AS mes, COUNT(*) FROM orders WHERE strftime('%Y', order_purchase_timestamp) = '2017' GROUP BY mes ORDER BY COUNT(*) DESC LIMIT 1"
+  },
+  {
+    "id": "q17",
+    "difficulty": "dificil",
+    "question": "Considere apenas pedidos com status 'delivered' e data de entrega registrada. Entre os estados dos clientes com pelo menos 500 desses pedidos, quais são os 5 com maior percentual de pedidos entregues com atraso (depois da data estimada)? Retorne o estado e o percentual (escala 0 a 100, 2 casas decimais).",
+    "gold_sql": "SELECT c.customer_state, ROUND(100.0 * SUM(CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date THEN 1 ELSE 0 END) / COUNT(*), 2) AS pct FROM orders o JOIN customers c ON c.customer_id = o.customer_id WHERE o.order_status = 'delivered' AND o.order_delivered_customer_date IS NOT NULL GROUP BY c.customer_state HAVING COUNT(*) >= 500 ORDER BY pct DESC LIMIT 5",
+    "ordered": true
+  },
+  {
+    "id": "q18",
+    "difficulty": "dificil",
+    "question": "Em 2017, desconsiderando pedidos cancelados, qual foi a receita de itens (soma de price) de cada mês e a variação percentual em relação ao mês anterior? Retorne mês (AAAA-MM), receita e variação percentual (2 casas decimais), ordenado por mês. O primeiro mês não tem variação (NULL).",
+    "gold_sql": "WITH m AS (SELECT strftime('%Y-%m', o.order_purchase_timestamp) AS mes, SUM(oi.price) AS receita FROM orders o JOIN order_items oi ON oi.order_id = o.order_id WHERE o.order_status <> 'canceled' AND strftime('%Y', o.order_purchase_timestamp) = '2017' GROUP BY mes) SELECT mes, ROUND(receita, 2), ROUND(100.0 * (receita - LAG(receita) OVER (ORDER BY mes)) / LAG(receita) OVER (ORDER BY mes), 2) FROM m ORDER BY mes",
+    "ordered": true,
+    "strict_columns": true
+  },
+  {
+    "id": "q19",
+    "difficulty": "dificil",
+    "question": "Quantos clientes únicos (identificados por customer_unique_id) fizeram mais de um pedido?",
+    "gold_sql": "SELECT COUNT(*) FROM (SELECT c.customer_unique_id FROM orders o JOIN customers c ON c.customer_id = o.customer_id GROUP BY c.customer_unique_id HAVING COUNT(DISTINCT o.order_id) > 1)"
+  },
+  {
+    "id": "q20",
+    "difficulty": "dificil",
+    "question": "Considere pedidos com status 'delivered' e data de entrega registrada. Retorne uma linha com duas colunas: a nota média das avaliações dos pedidos entregues com atraso (depois da data estimada) e a nota média dos pedidos entregues no prazo, nessa ordem.",
+    "gold_sql": "SELECT ROUND(AVG(CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date THEN r.review_score END), 2), ROUND(AVG(CASE WHEN o.order_delivered_customer_date <= o.order_estimated_delivery_date THEN r.review_score END), 2) FROM orders o JOIN order_reviews r ON r.order_id = o.order_id WHERE o.order_status = 'delivered' AND o.order_delivered_customer_date IS NOT NULL",
+    "strict_columns": true
+  },
+  {
+    "id": "q21",
+    "difficulty": "dificil",
+    "question": "Qual a categoria de produto (nome em inglês) com maior frete médio por item, considerando apenas categorias com pelo menos 100 itens vendidos e ignorando itens sem categoria? Retorne a categoria e o frete médio.",
+    "gold_sql": "SELECT p.product_category_name_english, ROUND(AVG(oi.freight_value), 2) FROM order_items oi JOIN products p ON p.product_id = oi.product_id WHERE p.product_category_name_english IS NOT NULL GROUP BY p.product_category_name_english HAVING COUNT(*) >= 100 ORDER BY AVG(oi.freight_value) DESC LIMIT 1"
+  },
+  {
+    "id": "q22",
+    "difficulty": "dificil",
+    "question": "Quantos pedidos têm itens de mais de um vendedor diferente?",
+    "gold_sql": "SELECT COUNT(*) FROM (SELECT order_id FROM order_items GROUP BY order_id HAVING COUNT(DISTINCT seller_id) > 1)"
+  }
+]
