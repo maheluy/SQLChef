@@ -38,7 +38,7 @@ from agent.db import UnsafeSQL, connect_ro, run_select  # noqa: E402
 QUERY_TIMEOUT_S = 30.0
 
 
-def load_questions(path, difficulty=None, limit=None):
+def load_questions(path, difficulty=None, limit=None, lote=None):
     questions = json.loads(Path(path).read_text(encoding="utf-8"))
     ids = [q["id"] for q in questions]
     dupes = [i for i, n in Counter(ids).items() if n > 1]
@@ -46,6 +46,8 @@ def load_questions(path, difficulty=None, limit=None):
         raise SystemExit(f"ids repetidos em {path}: {dupes}")
     if difficulty:
         questions = [q for q in questions if q["difficulty"] == difficulty]
+    if lote:
+        questions = [q for q in questions if q.get("lote") == lote]
     return questions[:limit] if limit else questions
 
 
@@ -116,6 +118,7 @@ def evaluate(questions, agent_fn, label):
         record = {
             "id": q["id"],
             "difficulty": q["difficulty"],
+            "lote": q.get("lote", ""),
             "correct": False,
             "error": "",
             "latency_s": "",
@@ -186,6 +189,9 @@ def summarize(records):
     for diff in ("facil", "media", "dificil"):
         if diff in by_diff:
             summary[diff] = block(by_diff[diff])
+    # lote 1 = q01-q22 (usadas para desenhar as versões); lote 2 = q23-q60 (inéditas)
+    for lote in sorted({r["lote"] for r in records if r["lote"] != ""}):
+        summary[f"lote{lote}"] = block([r for r in records if r["lote"] == lote])
     return summary
 
 
@@ -234,9 +240,10 @@ def main():
     parser.add_argument("--label", help="nome desta rodada (padrão: função + data/hora)")
     parser.add_argument("--difficulty", choices=["facil", "media", "dificil"])
     parser.add_argument("--limit", type=int)
+    parser.add_argument("--lote", type=int, help="1 = q01-q22, 2 = q23-q60")
     args = parser.parse_args()
 
-    questions = load_questions(args.questions, args.difficulty, args.limit)
+    questions = load_questions(args.questions, args.difficulty, args.limit, args.lote)
 
     if args.validate_gold:
         sys.exit(0 if validate_gold(questions) else 1)
