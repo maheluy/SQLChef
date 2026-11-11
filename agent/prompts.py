@@ -71,10 +71,29 @@ FEW_SHOT = [
 ]
 
 
+SCHEMA_NOTES = """Notas sobre os dados (o que o schema não mostra):
+- orders: uma linha por pedido. Liga a customers por customer_id; estado, cidade e \
+customer_unique_id do cliente existem só em customers.
+- order_items: uma linha por item do pedido. order_item_id é a posição do item dentro do \
+pedido (1, 2, 3...), não uma quantidade; para contar itens use COUNT(*).
+- order_payments: um pedido pode ter várias linhas de pagamento. O valor pago de um pedido é \
+SUM(payment_value) por order_id; para médias "por pedido", agregue por pedido antes de tirar a média.
+- order_reviews: um pedido pode ter mais de uma avaliação.
+- JOIN entre duas tabelas que têm várias linhas por pedido (ex.: itens e pagamentos) multiplica \
+as linhas e infla somas e contagens; agregue cada uma por order_id em uma subconsulta antes de juntar.
+- Para contar quantos grupos atendem a uma condição de HAVING, envolva o GROUP BY em uma \
+subconsulta: SELECT COUNT(*) FROM (SELECT ... GROUP BY ... HAVING ...).
+- No SQLite a divisão entre inteiros descarta as casas decimais; multiplique por 1.0 antes de dividir.
+- Se a pergunta pede um único valor (ex.: uma diferença entre duas médias), devolva só esse valor.
+"""
+
+
 @lru_cache(maxsize=None)
-def system_prompt(few_shot: bool) -> str:
+def system_prompt(few_shot: bool, notes: bool = False) -> str:
     """Prompt do sistema. Calculado uma vez por variante (o schema não muda durante a execução)."""
     parts = [INSTRUCTIONS, schema_prompt(sample_rows=1)]
+    if notes:
+        parts.append(SCHEMA_NOTES)
     if few_shot:
         parts.append("Exemplos de perguntas e consultas corretas:\n")
         for question, sql in FEW_SHOT:
@@ -125,6 +144,33 @@ def schema_hint(error: str) -> str:
         return "\n".join(lines)
     if m := _NO_TABLE.search(error or ""):
         return f"Dica: a tabela {m.group(1)} não existe. Tabelas disponíveis: {', '.join(tables)}."
+    return ""
+
+
+_HOW_MANY = re.compile(r"^\s*quant[oa]s\b", re.IGNORECASE)
+_EACH = re.compile(r"\bcada\b", re.IGNORECASE)
+_GROUP_BY = re.compile(r"\bgroup\s+by\b", re.IGNORECASE)
+
+
+def shape_problem(question: str, sql: str, columns: list, rows: list, truncated: bool = False) -> str:
+    """Checagem de formato (v5): a pergunta pede um único valor e voltou uma linha por grupo.
+
+    Pega o erro mais comum que roda sem erro: GROUP BY ... HAVING com COUNT, que devolve uma
+    linha por grupo em vez do total. Sem LLM. Não marca nenhum resultado gold da avaliação.
+    """
+    if len(rows) <= 1:
+        return ""
+    asks_count = bool(_HOW_MANY.search(question)) and not _EACH.search(question)
+    one_numeric_col = len(columns) == 1 and all(
+        isinstance(row[0], (int, float)) and not isinstance(row[0], bool) for row in rows
+    )
+    if asks_count or (one_numeric_col and _GROUP_BY.search(sql)):
+        n = f"mais de {len(rows)}" if truncated else str(len(rows))
+        return (
+            f"a pergunta pede um único valor, mas a consulta devolveu {n} linhas "
+            "(provavelmente uma por grupo). Para contar ou agregar os grupos, envolva o "
+            "GROUP BY em uma subconsulta: SELECT COUNT(*) FROM (SELECT ... GROUP BY ... HAVING ...)"
+        )
     return ""
 
 

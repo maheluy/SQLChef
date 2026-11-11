@@ -433,5 +433,147 @@
     "question": "Quantos vendedores do estado de SP venderam para clientes de pelo menos 20 estados diferentes?",
     "gold_sql": "SELECT COUNT(*) FROM (SELECT s.seller_id FROM sellers s JOIN order_items oi ON oi.seller_id = s.seller_id JOIN orders o ON o.order_id = oi.order_id JOIN customers c ON c.customer_id = o.customer_id WHERE s.seller_state = 'SP' GROUP BY s.seller_id HAVING COUNT(DISTINCT c.customer_state) >= 20)",
     "lote": 2
+  },
+  {
+    "id": "q61",
+    "difficulty": "facil",
+    "question": "Qual é o maior preço (price) de um item vendido?",
+    "gold_sql": "SELECT MAX(price) FROM order_items",
+    "lote": 3
+  },
+  {
+    "id": "q62",
+    "difficulty": "facil",
+    "question": "Quantos pedidos têm status 'unavailable'?",
+    "gold_sql": "SELECT COUNT(*) FROM orders WHERE order_status = 'unavailable'",
+    "lote": 3
+  },
+  {
+    "id": "q63",
+    "difficulty": "facil",
+    "question": "Quantos vendedores estão na cidade 'curitiba'?",
+    "gold_sql": "SELECT COUNT(*) FROM sellers WHERE seller_city = 'curitiba'",
+    "lote": 3
+  },
+  {
+    "id": "q64",
+    "difficulty": "facil",
+    "question": "Qual é o peso médio dos produtos cadastrados (product_weight_g), com 2 casas decimais?",
+    "gold_sql": "SELECT ROUND(AVG(product_weight_g), 2) FROM products",
+    "lote": 3
+  },
+  {
+    "id": "q65",
+    "difficulty": "facil",
+    "question": "Quantos clientes únicos (customer_unique_id) são do estado do RS?",
+    "gold_sql": "SELECT COUNT(DISTINCT customer_unique_id) FROM customers WHERE customer_state = 'RS'",
+    "lote": 3
+  },
+  {
+    "id": "q66",
+    "difficulty": "media",
+    "question": "Quais são os 3 estados de clientes com mais pedidos? Retorne o estado e a quantidade de pedidos.",
+    "gold_sql": "SELECT c.customer_state, COUNT(*) AS qtd FROM orders o JOIN customers c ON c.customer_id = o.customer_id GROUP BY c.customer_state ORDER BY qtd DESC LIMIT 3",
+    "ordered": true,
+    "lote": 3
+  },
+  {
+    "id": "q67",
+    "difficulty": "media",
+    "question": "Qual é o valor médio de um registro de pagamento do tipo 'boleto', com 2 casas decimais?",
+    "gold_sql": "SELECT ROUND(AVG(payment_value), 2) FROM order_payments WHERE payment_type = 'boleto'",
+    "lote": 3
+  },
+  {
+    "id": "q68",
+    "difficulty": "media",
+    "question": "Quantos produtos distintos da categoria bed_bath_table (nome em inglês) foram vendidos pelo menos uma vez?",
+    "gold_sql": "SELECT COUNT(DISTINCT oi.product_id) FROM order_items oi JOIN products p ON p.product_id = oi.product_id WHERE p.product_category_name_english = 'bed_bath_table'",
+    "lote": 3
+  },
+  {
+    "id": "q69",
+    "difficulty": "media",
+    "question": "Para cada nota de avaliação, quantas avaliações existem? Retorne a nota e a quantidade, ordenado pela nota.",
+    "gold_sql": "SELECT review_score, COUNT(*) FROM order_reviews GROUP BY review_score ORDER BY review_score",
+    "ordered": true,
+    "lote": 3
+  },
+  {
+    "id": "q70",
+    "difficulty": "media",
+    "question": "Qual é o frete médio por item (freight_value) dos itens vendidos por vendedores do estado de SP, com 2 casas decimais?",
+    "gold_sql": "SELECT ROUND(AVG(oi.freight_value), 2) FROM order_items oi JOIN sellers s ON s.seller_id = oi.seller_id WHERE s.seller_state = 'SP'",
+    "lote": 3
+  },
+  {
+    "id": "q71",
+    "difficulty": "media",
+    "question": "Quantos pedidos distintos têm pelo menos um pagamento do tipo 'voucher'?",
+    "gold_sql": "SELECT COUNT(DISTINCT order_id) FROM order_payments WHERE payment_type = 'voucher'",
+    "lote": 3
+  },
+  {
+    "id": "q72",
+    "difficulty": "media",
+    "question": "Quantos clientes únicos (customer_unique_id) têm pelo menos um pedido com status 'canceled'?",
+    "gold_sql": "SELECT COUNT(DISTINCT c.customer_unique_id) FROM orders o JOIN customers c ON c.customer_id = o.customer_id WHERE o.order_status = 'canceled'",
+    "lote": 3
+  },
+  {
+    "id": "q73",
+    "difficulty": "media",
+    "question": "Qual é o valor total pago (soma de payment_value) em pedidos de clientes do estado do RJ, com 2 casas decimais?",
+    "gold_sql": "SELECT ROUND(SUM(p.payment_value), 2) FROM order_payments p JOIN orders o ON o.order_id = p.order_id JOIN customers c ON c.customer_id = o.customer_id WHERE c.customer_state = 'RJ'",
+    "lote": 3
+  },
+  {
+    "id": "q74",
+    "difficulty": "media",
+    "question": "Quantos itens vendidos (linhas da tabela de itens) são de produtos sem categoria registrada (product_category_name nulo)?",
+    "gold_sql": "SELECT COUNT(*) FROM order_items oi JOIN products p ON p.product_id = oi.product_id WHERE p.product_category_name IS NULL",
+    "lote": 3
+  },
+  {
+    "id": "q75",
+    "difficulty": "dificil",
+    "question": "Quantos pedidos têm mais de um registro de pagamento?",
+    "gold_sql": "SELECT COUNT(*) FROM (SELECT order_id FROM order_payments GROUP BY order_id HAVING COUNT(*) > 1)",
+    "lote": 3
+  },
+  {
+    "id": "q76",
+    "difficulty": "dificil",
+    "question": "Quantos pedidos têm exatamente 3 itens?",
+    "gold_sql": "SELECT COUNT(*) FROM (SELECT order_id FROM order_items GROUP BY order_id HAVING COUNT(*) = 3)",
+    "lote": 3
+  },
+  {
+    "id": "q77",
+    "difficulty": "dificil",
+    "question": "Entre os pedidos que receberam alguma avaliação com nota 1, qual é o valor médio total pago por pedido (soma dos pagamentos do pedido)? Use 2 casas decimais.",
+    "gold_sql": "SELECT ROUND(AVG(total), 2) FROM (SELECT order_id, SUM(payment_value) AS total FROM order_payments WHERE order_id IN (SELECT order_id FROM order_reviews WHERE review_score = 1) GROUP BY order_id)",
+    "lote": 3
+  },
+  {
+    "id": "q78",
+    "difficulty": "dificil",
+    "question": "Ignorando itens sem categoria, quantas categorias de produto (nome em inglês) têm pelo menos 1000 itens vendidos?",
+    "gold_sql": "SELECT COUNT(*) FROM (SELECT p.product_category_name_english FROM order_items oi JOIN products p ON p.product_id = oi.product_id WHERE p.product_category_name_english IS NOT NULL GROUP BY p.product_category_name_english HAVING COUNT(*) >= 1000)",
+    "lote": 3
+  },
+  {
+    "id": "q79",
+    "difficulty": "dificil",
+    "question": "Que percentual dos clientes únicos (customer_unique_id) fez mais de um pedido? Responda em escala de 0 a 100, com 2 casas decimais.",
+    "gold_sql": "SELECT ROUND(100.0 * (SELECT COUNT(*) FROM (SELECT c.customer_unique_id FROM orders o JOIN customers c ON c.customer_id = o.customer_id GROUP BY c.customer_unique_id HAVING COUNT(*) > 1)) / (SELECT COUNT(DISTINCT customer_unique_id) FROM customers), 2)",
+    "lote": 3
+  },
+  {
+    "id": "q80",
+    "difficulty": "dificil",
+    "question": "Considere pedidos com status 'delivered' e data de entrega ao cliente registrada. Entre os pedidos cujo frete total (soma de freight_value dos itens do pedido) passa de 100 reais, qual é o tempo médio de entrega, da compra até a entrega ao cliente, em dias? Use 2 casas decimais.",
+    "gold_sql": "SELECT ROUND(AVG(julianday(o.order_delivered_customer_date) - julianday(o.order_purchase_timestamp)), 2) FROM orders o JOIN (SELECT order_id, SUM(freight_value) AS frete FROM order_items GROUP BY order_id) i ON i.order_id = o.order_id WHERE o.order_status = 'delivered' AND o.order_delivered_customer_date IS NOT NULL AND i.frete > 100",
+    "lote": 3
   }
 ]

@@ -23,6 +23,7 @@ VERSION_INFO = {
     "v2": "+ exemplos few-shot",
     "v3": "+ autocorreção com retry",
     "v4": "+ dica de schema na correção",
+    "v5": "+ notas de schema e checagem de formato",
 }
 
 QUESTIONS_PATH = Path(__file__).resolve().parent / "eval" / "questions.json"
@@ -154,6 +155,8 @@ def render(turn: dict) -> None:
         st.warning(result["text"])
     else:
         st.markdown(result["text"])
+        if result.get("suspect"):
+            st.warning(f"Resultado com formato suspeito mesmo após as tentativas: {result['suspect']}")
 
     cols = st.columns(4)
     cols[0].metric("Tentativas", result["attempts"])

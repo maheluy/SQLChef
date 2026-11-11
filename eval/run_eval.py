@@ -22,6 +22,7 @@ import argparse
 import csv
 import importlib
 import json
+import re
 import sqlite3
 import sys
 import time
@@ -189,7 +190,8 @@ def summarize(records):
     for diff in ("facil", "media", "dificil"):
         if diff in by_diff:
             summary[diff] = block(by_diff[diff])
-    # lote 1 = q01-q22 (usadas para desenhar as versões); lote 2 = q23-q60 (inéditas)
+    # lote 1 = q01-q22 (usadas para desenhar v2-v4); lote 2 = q23-q60 (inéditas até a v4);
+    # lote 3 = q61-q80 (escritas antes da v5, para medi-la)
     for lote in sorted({r["lote"] for r in records if r["lote"] != ""}):
         summary[f"lote{lote}"] = block([r for r in records if r["lote"] == lote])
     return summary
@@ -211,7 +213,8 @@ def run_config(agent_spec):
         from agent.config import get_settings
 
         s = get_settings()
-        version = agent_spec.rsplit("_", 1)[-1] if agent_spec.endswith(("_v1", "_v2", "_v3", "_v4")) else s.version
+        m = re.search(r"_(v\d+)$", agent_spec)
+        version = m.group(1) if m else s.version
         config.update(provider="ollama", model=s.model, version=version, num_ctx=s.num_ctx)
     except Exception:  # agente externo sem agent.config: registra só o spec
         pass
@@ -240,7 +243,7 @@ def main():
     parser.add_argument("--label", help="nome desta rodada (padrão: função + data/hora)")
     parser.add_argument("--difficulty", choices=["facil", "media", "dificil"])
     parser.add_argument("--limit", type=int)
-    parser.add_argument("--lote", type=int, help="1 = q01-q22, 2 = q23-q60")
+    parser.add_argument("--lote", type=int, help="1 = q01-q22, 2 = q23-q60, 3 = q61-q80")
     args = parser.parse_args()
 
     questions = load_questions(args.questions, args.difficulty, args.limit, args.lote)

@@ -5,6 +5,8 @@ Versões (para a tabela comparativa):
     v2  + few-shot
     v3  + few-shot + autocorreção (erro ou resultado vazio volta ao LLM, até MAX_ATTEMPTS)
     v4  v3 + dica de schema na correção (em quais tabelas está a coluna que não existe)
+    v5  v4 + notas de semântica do schema no prompt + checagem de formato do resultado
+        (pergunta pede um valor e voltou uma linha por grupo -> correção)
 
 O LLM roda localmente no Ollama; o modelo vem de OLLAMA_MODEL no ambiente/.env.
 
@@ -35,6 +37,7 @@ class AgentState(TypedDict, total=False):
     messages: Annotated[list, operator.add]  # histórico enviado ao LLM (só cresce)
     sql: str
     error: str
+    suspect: str  # v5: resultado roda, mas tem formato suspeito (dispara correção, não bloqueia)
     attempts: int
     columns: list
     rows: list
@@ -45,11 +48,12 @@ class AgentState(TypedDict, total=False):
 
 def _build_graph(settings: Settings):
     llm = get_llm(settings)
-    few_shot = settings.version in ("v2", "v3", "v4")
-    retry = settings.version in ("v3", "v4")
-    hints = settings.version == "v4"
+    few_shot = settings.version in ("v2", "v3", "v4", "v5")
+    retry = settings.version in ("v3", "v4", "v5")
+    hints = settings.version in ("v4", "v5")
+    notes = shape = settings.version == "v5"
     max_attempts = settings.max_attempts if retry else 1
-    system = prompts.system_prompt(few_shot)
+    system = prompts.system_prompt(few_shot, notes)
 
     def generate(state: AgentState) -> dict:
         response = llm.complete(system, state["messages"])
@@ -65,25 +69,31 @@ def _build_graph(settings: Settings):
         try:
             result = run_select(state["sql"], max_rows=PREVIEW_ROWS)
         except (UnsafeSQL, sqlite3.Error) as exc:
-            return {"error": f"{type(exc).__name__}: {exc}", "columns": [], "rows": []}
-        error = ""
+            return {"error": f"{type(exc).__name__}: {exc}", "suspect": "", "columns": [], "rows": []}
+        error = suspect = ""
         if not result.rows:
             error = "a consulta não devolveu nenhuma linha; confira filtros, valores e joins"
         elif all(all(v is None for v in row) for row in result.rows):
             error = "a consulta devolveu apenas NULL; confira filtros, valores e joins"
+        elif shape:
+            suspect = prompts.shape_problem(
+                state["question"], state["sql"], result.columns, result.rows, result.truncated
+            )
         return {
             "error": error,
+            "suspect": suspect,
             "columns": result.columns,
             "rows": result.rows,
             "truncated": result.truncated,
         }
 
     def repair(state: AgentState) -> dict:
-        hint = prompts.schema_hint(state["error"]) if hints else ""
-        return {"messages": [prompts.repair_message(state["sql"], state["error"], hint)]}
+        problem = state.get("error") or state.get("suspect", "")
+        hint = prompts.schema_hint(problem) if hints else ""
+        return {"messages": [prompts.repair_message(state["sql"], problem, hint)]}
 
     def should_retry(state: AgentState) -> str:
-        if state.get("error") and state["attempts"] < max_attempts:
+        if (state.get("error") or state.get("suspect")) and state["attempts"] < max_attempts:
             return "repair"
         return END
 
@@ -146,6 +156,10 @@ def generate_sql_v4(question: str) -> dict:
     return _for_eval(run(question, "v4"))
 
 
+def generate_sql_v5(question: str) -> dict:
+    return _for_eval(run(question, "v5"))
+
+
 def answer(question: str, version: str | None = None, model: str | None = None) -> dict:
     """Para a demo: SQL, resultado e uma resposta curta em português.
 
@@ -160,6 +174,7 @@ def answer(question: str, version: str | None = None, model: str | None = None) 
         "truncated": state.get("truncated", False),
         "attempts": state.get("attempts", 0),
         "error": state.get("error", ""),
+        "suspect": state.get("suspect", ""),
         "input_tokens": state.get("input_tokens", 0),
         "output_tokens": state.get("output_tokens", 0),
         "version": settings.version,
