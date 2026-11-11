@@ -5,10 +5,10 @@ Versões (para a tabela comparativa):
     v2  + few-shot
     v3  + few-shot + autocorreção (erro ou resultado vazio volta ao LLM, até MAX_ATTEMPTS)
 
-Provedor (Claude via API ou Ollama local) vem de LLM_PROVIDER no ambiente/.env.
+O LLM roda localmente no Ollama; o modelo vem de OLLAMA_MODEL no ambiente/.env.
 
 Avaliação:
-    python eval/run_eval.py --agent agent.sql_agent:generate_sql_v1 --label anthropic_v1
+    python eval/run_eval.py --agent agent.sql_agent:generate_sql_v1 --label qwen7b_v1
 Linha de comando:
     python -m agent.sql_agent "Quantos pedidos foram cancelados?"
 """
@@ -40,7 +40,6 @@ class AgentState(TypedDict, total=False):
     truncated: bool
     input_tokens: int
     output_tokens: int
-    cost_usd: float
 
 
 def _build_graph(settings: Settings):
@@ -58,7 +57,6 @@ def _build_graph(settings: Settings):
             "attempts": state.get("attempts", 0) + 1,
             "input_tokens": state.get("input_tokens", 0) + response.input_tokens,
             "output_tokens": state.get("output_tokens", 0) + response.output_tokens,
-            "cost_usd": state.get("cost_usd", 0.0) + response.cost_usd,
         }
 
     def execute(state: AgentState) -> dict:
@@ -114,7 +112,6 @@ def run(question: str, version: str | None = None) -> AgentState:
 def _for_eval(state: AgentState) -> dict:
     return {
         "sql": state.get("sql", ""),
-        "cost_usd": round(state.get("cost_usd", 0.0), 6),
         "input_tokens": state.get("input_tokens", 0),
         "output_tokens": state.get("output_tokens", 0),
         "attempts": state.get("attempts", 0),
@@ -147,7 +144,6 @@ def answer(question: str, version: str | None = None) -> dict:
         "rows": state.get("rows", []),
         "attempts": state.get("attempts", 0),
         "error": state.get("error", ""),
-        "cost_usd": state.get("cost_usd", 0.0),
     }
     if result["rows"] and not result["error"]:
         settings = get_settings()
@@ -159,7 +155,6 @@ def answer(question: str, version: str | None = None) -> dict:
         )
         response = llm.complete(prompts.ANSWER_SYSTEM, [msg])
         result["text"] = response.text.strip()
-        result["cost_usd"] += response.cost_usd
     else:
         result["text"] = f"Não consegui responder: {result['error'] or 'sem resultado'}"
     return result
@@ -170,11 +165,10 @@ if __name__ == "__main__":
         raise SystemExit('uso: python -m agent.sql_agent "sua pergunta"')
     s = get_settings()
     out = answer(" ".join(sys.argv[1:]))
-    print(f"[{s.provider} / {s.model} / {s.version}] tentativas: {out['attempts']}")
+    print(f"[ollama / {s.model} / {s.version}] tentativas: {out['attempts']}")
     print(f"\nSQL:\n{out['sql']}\n")
     if out["columns"]:
         print(" | ".join(out["columns"]))
         for row in out["rows"][:10]:
             print(" | ".join(str(v) for v in row))
     print(f"\n{out['text']}")
-    print(f"\ncusto estimado: US$ {out['cost_usd']:.6f}")

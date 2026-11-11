@@ -6,7 +6,7 @@ Uso (a partir da raiz do repositório):
     python eval/run_eval.py --validate-gold
 
     # 2) avaliar um agente. A função recebe a pergunta e devolve a SQL
-    #    (str) ou um dict {"sql": ..., "cost_usd": ..., "input_tokens": ..., "output_tokens": ...}
+    #    (str) ou um dict {"sql": ..., "input_tokens": ..., "output_tokens": ..., "attempts": ...}
     python eval/run_eval.py --agent agent.sql_agent:generate_sql --label v1_sem_exemplos
 
 Regras de comparação (documente no README):
@@ -119,7 +119,6 @@ def evaluate(questions, agent_fn, label):
             "correct": False,
             "error": "",
             "latency_s": "",
-            "cost_usd": "",
             "input_tokens": "",
             "output_tokens": "",
             "attempts": "",
@@ -139,7 +138,7 @@ def evaluate(questions, agent_fn, label):
 
         if isinstance(answer, dict):
             sql = answer.get("sql", "")
-            for key in ("cost_usd", "input_tokens", "output_tokens", "attempts"):
+            for key in ("input_tokens", "output_tokens", "attempts"):
                 record[key] = answer.get(key, "")
         else:
             sql = answer
@@ -170,13 +169,17 @@ def summarize(records):
 
     def block(rows):
         latencies = [_num(r["latency_s"]) for r in rows if _num(r["latency_s"]) is not None]
-        costs = [_num(r["cost_usd"]) for r in rows if _num(r["cost_usd"]) is not None]
+        tokens = [
+            _num(r["input_tokens"]) + _num(r["output_tokens"])
+            for r in rows
+            if _num(r["input_tokens"]) is not None and _num(r["output_tokens"]) is not None
+        ]
         return {
             "n": len(rows),
             "acertos": sum(1 for r in rows if r["correct"]),
             "acuracia": round(sum(1 for r in rows if r["correct"]) / len(rows), 4) if rows else 0,
             "latencia_media_s": round(sum(latencies) / len(latencies), 3) if latencies else None,
-            "custo_medio_usd": round(sum(costs) / len(costs), 6) if costs else None,
+            "tokens_medios": round(sum(tokens) / len(tokens)) if tokens else None,
         }
 
     summary = {"geral": block(records)}
@@ -188,11 +191,11 @@ def summarize(records):
 
 def print_summary(label, summary):
     print(f"\n=== {label} ===")
-    print(f"{'grupo':<8} {'acertos':>8} {'acurácia':>9} {'lat. média (s)':>15} {'custo médio (US$)':>18}")
+    print(f"{'grupo':<8} {'acertos':>8} {'acurácia':>9} {'lat. média (s)':>15} {'tokens médios':>14}")
     for name, s in summary.items():
         lat = "-" if s["latencia_media_s"] is None else s["latencia_media_s"]
-        cost = "-" if s["custo_medio_usd"] is None else s["custo_medio_usd"]
-        print(f"{name:<8} {s['acertos']:>3}/{s['n']:<4} {s['acuracia']:>9.1%} {lat!s:>15} {cost!s:>18}")
+        tok = "-" if s["tokens_medios"] is None else s["tokens_medios"]
+        print(f"{name:<8} {s['acertos']:>3}/{s['n']:<4} {s['acuracia']:>9.1%} {lat!s:>15} {tok!s:>14}")
 
 
 def run_config(agent_spec):
@@ -203,9 +206,7 @@ def run_config(agent_spec):
 
         s = get_settings()
         version = agent_spec.rsplit("_", 1)[-1] if agent_spec.endswith(("_v1", "_v2", "_v3")) else s.version
-        config.update(provider=s.provider, model=s.model, version=version)
-        if s.provider == "anthropic":
-            config["effort"] = s.anthropic_effort
+        config.update(provider="ollama", model=s.model, version=version, num_ctx=s.num_ctx)
     except Exception:  # agente externo sem agent.config: registra só o spec
         pass
     return config

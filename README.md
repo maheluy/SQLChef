@@ -6,20 +6,18 @@ Agente text-to-SQL que responde em português a perguntas sobre dados reais de u
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # escolha o provedor e preencha a chave
+cp .env.example .env
 ```
 
-O agente funciona com dois provedores, escolhidos por `LLM_PROVIDER` no `.env` (ou no ambiente):
-
-| Provedor | Configuração |
-|---|---|
-| `anthropic` (API) | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` , `ANTHROPIC_EFFORT` |
-| `ollama` (local) | instale o [Ollama](https://ollama.com/download), rode `ollama pull qwen2.5-coder:7b`; `OLLAMA_MODEL`, `OLLAMA_HOST` |
+O LLM roda localmente no [Ollama](https://ollama.com/download), sem custo de API:
 
 ```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull qwen2.5-coder:7b
 python -m agent.sql_agent "Quantos pedidos foram cancelados?"
-LLM_PROVIDER=ollama python -m agent.sql_agent "Quantos pedidos foram cancelados?"
 ```
+
+Configuração no `.env` (ou no ambiente): `OLLAMA_MODEL`, `OLLAMA_HOST`, `OLLAMA_NUM_CTX`, `AGENT_VERSION`, `MAX_ATTEMPTS`.
 
 ## Arquitetura
 
@@ -33,14 +31,14 @@ Três versões para comparação:
 | `v2` | + exemplos few-shot (diferentes das perguntas de teste) |
 | `v3` | + autocorreção com retry |
 
-`agent/llm.py` dá a mesma interface aos dois provedores e registra tokens e custo (Claude: tabela de preços com cache do prompt; Ollama: custo zero, compara-se a latência).
+`agent/llm.py` isola o cliente do Ollama e registra os tokens de cada chamada; trocar de modelo é só mudar `OLLAMA_MODEL`.
 
 ## Avaliação
 
 ```bash
 python eval/run_eval.py --validate-gold
-LLM_PROVIDER=anthropic python eval/run_eval.py --agent agent.sql_agent:generate_sql_v1 --label anthropic_v1
-LLM_PROVIDER=ollama    python eval/run_eval.py --agent agent.sql_agent:generate_sql_v3 --label ollama_v3
+python eval/run_eval.py --agent agent.sql_agent:generate_sql_v1 --label qwen7b_v1
+OLLAMA_MODEL=llama3.1:8b python eval/run_eval.py --agent agent.sql_agent:generate_sql_v3 --label llama8b_v3
 ```
 
-Resultados em `eval/results/<label>.csv` (por pergunta, com tentativas, tokens, custo e latência) e `<label>_summary.json` (acurácia por dificuldade e a configuração da rodada).
+Resultados em `eval/results/<label>.csv` (por pergunta, com tentativas, tokens e latência) e `<label>_summary.json` (acurácia por dificuldade e a configuração da rodada).
