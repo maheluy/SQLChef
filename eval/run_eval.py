@@ -205,7 +205,7 @@ def run_config(agent_spec):
         from agent.config import get_settings
 
         s = get_settings()
-        version = agent_spec.rsplit("_", 1)[-1] if agent_spec.endswith(("_v1", "_v2", "_v3")) else s.version
+        version = agent_spec.rsplit("_", 1)[-1] if agent_spec.endswith(("_v1", "_v2", "_v3", "_v4")) else s.version
         config.update(provider="ollama", model=s.model, version=version, num_ctx=s.num_ctx)
     except Exception:  # agente externo sem agent.config: registra só o spec
         pass

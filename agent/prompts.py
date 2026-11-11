@@ -6,7 +6,7 @@ Os exemplos few-shot NÃO repetem perguntas de eval/questions.json, para não in
 import re
 from functools import lru_cache
 
-from agent.db import schema_prompt
+from agent.db import connect_ro, schema_prompt
 
 INSTRUCTIONS = """Você é um analista de dados que escreve consultas SQL para um banco SQLite \
 com dados públicos da Olist, um marketplace brasileiro de e-commerce.
@@ -86,14 +86,57 @@ def question_message(question: str) -> dict:
     return {"role": "user", "content": f"Pergunta: {question}"}
 
 
-def repair_message(sql: str, error: str) -> dict:
+@lru_cache(maxsize=None)
+def _table_columns() -> dict:
+    """{tabela: [colunas]} lido do banco (ignora tabelas internas do SQLite)."""
+    conn = connect_ro()
+    try:
+        tables = [
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            )
+        ]
+        return {t: [r[1] for r in conn.execute(f"PRAGMA table_info({t})")] for t in tables}
+    finally:
+        conn.close()
+
+
+_NO_COLUMN = re.compile(r"no such column: (?:[\w]+\.)?(\w+)", re.IGNORECASE)
+_NO_TABLE = re.compile(r"no such table: (\w+)", re.IGNORECASE)
+
+
+def schema_hint(error: str) -> str:
+    """Dica de schema para erros de ligação (v4): onde a coluna existe e com quais colunas.
+
+    Ver as colunas das tabelas certas deixa visível a chave de JOIN (ex.: customer_id),
+    que a mensagem crua do SQLite não mostra.
+    """
+    tables = _table_columns()
+    if m := _NO_COLUMN.search(error or ""):
+        column = m.group(1)
+        owners = [t for t, cols in tables.items() if column in cols]
+        if not owners:
+            return f"Dica: a coluna {column} não existe em nenhuma tabela; confira o schema."
+        lines = [f"Dica: a coluna {column} existe apenas em: {', '.join(owners)}."]
+        lines += [f"  {t}({', '.join(tables[t])})" for t in owners]
+        lines.append("Se precisar dela, faça JOIN com essa tabela por uma coluna em comum.")
+        return "\n".join(lines)
+    if m := _NO_TABLE.search(error or ""):
+        return f"Dica: a tabela {m.group(1)} não existe. Tabelas disponíveis: {', '.join(tables)}."
+    return ""
+
+
+def repair_message(sql: str, error: str, hint: str = "") -> dict:
     return {
         "role": "user",
         "content": (
             "A consulta abaixo falhou ou devolveu um resultado suspeito.\n"
             f"```sql\n{sql}\n```\n"
             f"Problema: {error}\n"
-            "Corrija a consulta para responder à pergunta original. "
+            + (f"{hint}\n" if hint else "")
+            + "Corrija a consulta para responder à pergunta original. "
             "Responda somente com a consulta corrigida em um bloco ```sql ... ```."
         ),
     }

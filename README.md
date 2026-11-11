@@ -30,6 +30,7 @@ Três versões para comparação:
 | `v1` | uma chamada, sem exemplos |
 | `v2` | + exemplos few-shot (diferentes das perguntas de teste) |
 | `v3` | + autocorreção com retry |
+| `v4` | + dica de schema na correção: se a coluna não existe, diz em quais tabelas ela está e mostra as colunas delas |
 
 `agent/llm.py` isola o cliente do Ollama e registra os tokens de cada chamada; trocar de modelo é só mudar `OLLAMA_MODEL`.
 

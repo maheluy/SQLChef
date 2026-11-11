@@ -4,6 +4,7 @@ Versões (para a tabela comparativa):
     v1  uma chamada, sem exemplos
     v2  + few-shot
     v3  + few-shot + autocorreção (erro ou resultado vazio volta ao LLM, até MAX_ATTEMPTS)
+    v4  v3 + dica de schema na correção (em quais tabelas está a coluna que não existe)
 
 O LLM roda localmente no Ollama; o modelo vem de OLLAMA_MODEL no ambiente/.env.
 
@@ -44,8 +45,9 @@ class AgentState(TypedDict, total=False):
 
 def _build_graph(settings: Settings):
     llm = get_llm(settings)
-    few_shot = settings.version in ("v2", "v3")
-    retry = settings.version == "v3"
+    few_shot = settings.version in ("v2", "v3", "v4")
+    retry = settings.version in ("v3", "v4")
+    hints = settings.version == "v4"
     max_attempts = settings.max_attempts if retry else 1
     system = prompts.system_prompt(few_shot)
 
@@ -77,7 +79,8 @@ def _build_graph(settings: Settings):
         }
 
     def repair(state: AgentState) -> dict:
-        return {"messages": [prompts.repair_message(state["sql"], state["error"])]}
+        hint = prompts.schema_hint(state["error"]) if hints else ""
+        return {"messages": [prompts.repair_message(state["sql"], state["error"], hint)]}
 
     def should_retry(state: AgentState) -> str:
         if state.get("error") and state["attempts"] < max_attempts:
@@ -133,6 +136,10 @@ def generate_sql_v2(question: str) -> dict:
 
 def generate_sql_v3(question: str) -> dict:
     return _for_eval(run(question, "v3"))
+
+
+def generate_sql_v4(question: str) -> dict:
+    return _for_eval(run(question, "v4"))
 
 
 def answer(question: str, version: str | None = None) -> dict:
