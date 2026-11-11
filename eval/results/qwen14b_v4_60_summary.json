@@ -1,0 +1,52 @@
+{
+  "geral": {
+    "n": 60,
+    "acertos": 52,
+    "acuracia": 0.8667,
+    "latencia_media_s": 6.37,
+    "tokens_medios": 2100
+  },
+  "facil": {
+    "n": 16,
+    "acertos": 16,
+    "acuracia": 1.0,
+    "latencia_media_s": 2.199,
+    "tokens_medios": 1930
+  },
+  "media": {
+    "n": 28,
+    "acertos": 27,
+    "acuracia": 0.9643,
+    "latencia_media_s": 4.856,
+    "tokens_medios": 1969
+  },
+  "dificil": {
+    "n": 16,
+    "acertos": 9,
+    "acuracia": 0.5625,
+    "latencia_media_s": 13.189,
+    "tokens_medios": 2498
+  },
+  "lote1": {
+    "n": 22,
+    "acertos": 20,
+    "acuracia": 0.9091,
+    "latencia_media_s": 7.214,
+    "tokens_medios": 2091
+  },
+  "lote2": {
+    "n": 38,
+    "acertos": 32,
+    "acuracia": 0.8421,
+    "latencia_media_s": 5.881,
+    "tokens_medios": 2105
+  },
+  "config": {
+    "agent": "agent.sql_agent:generate_sql_v4",
+    "data": "2026-11-11T17:31:32",
+    "provider": "ollama",
+    "model": "qwen2.5-coder:14b",
+    "version": "v4",
+    "num_ctx": 8192
+  }
+}

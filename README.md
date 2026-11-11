@@ -74,13 +74,16 @@ Resultados em `eval/results/<label>.csv` (por pergunta: acerto, SQL gerada, tent
 
 Ollama local com temperatura 0 (rodar de novo dá as mesmas SQLs), GPU AMD Radeon (Navi 33, ~8 GB de VRAM).
 
-| Modelo | Versão | Geral | Fácil | Média | Difícil | Lote 2 (inédito) | Latência média | Tokens/pergunta |
+| Modelo | Versão | Geral | Fácil | Média | Difícil | Latência média | Tokens/pergunta |
 |---|---|---|---|---|---|---|---|---|
-| qwen2.5-coder:7b | v1 | 44/60 (73,3%) | 16/16 | 23/28 | 5/16 | 27/38 (71,1%) | 1,2 s | 1.486 |
-| qwen2.5-coder:7b | v2 | 46/60 (76,7%) | 16/16 | 25/28 | 5/16 | 28/38 (73,7%) | 1,1 s | 1.980 |
-| qwen2.5-coder:7b | v3 | 48/60 (80,0%) | 16/16 | 27/28 | 5/16 | 29/38 (76,3%) | 1,6 s | 2.452 |
-| qwen2.5-coder:7b | v4 | 48/60 (80,0%) | 16/16 | 27/28 | 5/16 | 29/38 (76,3%) | 1,6 s | 2.381 |
-| qwen2.5-coder:14b | v3 | **52/60 (86,7%)** | 16/16 | 27/28 | **9/16** | **32/38 (84,2%)** | 7,2 s | 2.130 |
+| qwen2.5-coder:7b | v1 | 44/60 (73,3%) | 16/16 | 23/28 | 5/16 | 1,2 s | 1.486 |
+| qwen2.5-coder:7b | v2 | 46/60 (76,7%) | 16/16 | 25/28 | 5/16 | 1,1 s | 1.980 |
+| qwen2.5-coder:7b | v3 | 48/60 (80,0%) | 16/16 | 27/28 | 5/16 | 1,6 s | 2.452 |
+| qwen2.5-coder:7b | v4 | 48/60 (80,0%) | 16/16 | 27/28 | 5/16 | 1,6 s | 2.381 |
+| qwen2.5-coder:14b | v1 | 48/60 (80,0%) | 16/16 | 27/28 | 5/16 | 6,6 s | 1.287 |
+| qwen2.5-coder:14b | v2 | 52/60 (86,7%) | 16/16 | 27/28 | 9/16 | 6,7 s | 1.980 |
+| qwen2.5-coder:14b | v3 | 52/60 (86,7%) | 16/16 | 27/28 | 9/16 | 7,2 s | 2.130 |
+| qwen2.5-coder:14b | v4 | 52/60 (86,7%) | 16/16 | 27/28 | 9/16 | 6,4 s | 2.100 |
 
 O que os números mostram:
 - **Exemplos e autocorreção ajudam, inclusive em perguntas inéditas.** No 7B, de v1 para v3 são 4 acertos a mais no total e 3 no lote 2. O ganho vem todo das perguntas médias (de 23 para 27 de 28); as fáceis já estavam no máximo.
