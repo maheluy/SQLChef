@@ -1,0 +1,38 @@
+{
+  "geral": {
+    "n": 22,
+    "acertos": 19,
+    "acuracia": 0.8636,
+    "latencia_media_s": 1.94,
+    "tokens_medios": 2568
+  },
+  "facil": {
+    "n": 6,
+    "acertos": 6,
+    "acuracia": 1.0,
+    "latencia_media_s": 0.44,
+    "tokens_medios": 1931
+  },
+  "media": {
+    "n": 10,
+    "acertos": 10,
+    "acuracia": 1.0,
+    "latencia_media_s": 1.175,
+    "tokens_medios": 2188
+  },
+  "dificil": {
+    "n": 6,
+    "acertos": 3,
+    "acuracia": 0.5,
+    "latencia_media_s": 4.715,
+    "tokens_medios": 3839
+  },
+  "config": {
+    "agent": "agent.sql_agent:generate_sql_v3",
+    "data": "2026-11-10T21:27:17",
+    "provider": "ollama",
+    "model": "qwen2.5-coder:7b",
+    "version": "v3",
+    "num_ctx": 8192
+  }
+}
