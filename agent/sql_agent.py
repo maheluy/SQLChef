@@ -103,12 +103,16 @@ def _graph_for(settings: Settings):
     return _build_graph(settings)
 
 
-def run(question: str, version: str | None = None) -> AgentState:
-    """Executa o grafo e devolve o estado final completo."""
+def _settings(version: str | None = None, model: str | None = None) -> Settings:
+    """Configuração do ambiente com versão e/ou modelo substituídos."""
     settings = get_settings()
-    if version:
-        settings = Settings(**{**settings.__dict__, "version": version})
-    graph, _ = _graph_for(settings)
+    overrides = {k: v for k, v in (("version", version), ("model", model)) if v}
+    return Settings(**{**settings.__dict__, **overrides}) if overrides else settings
+
+
+def run(question: str, version: str | None = None, model: str | None = None) -> AgentState:
+    """Executa o grafo e devolve o estado final completo."""
+    graph, _ = _graph_for(_settings(version, model))
     return graph.invoke({"question": question, "messages": [prompts.question_message(question)]})
 
 
@@ -142,26 +146,32 @@ def generate_sql_v4(question: str) -> dict:
     return _for_eval(run(question, "v4"))
 
 
-def answer(question: str, version: str | None = None) -> dict:
-    """Para a demo: SQL, resultado e uma resposta curta em português."""
-    state = run(question, version)
+def answer(question: str, version: str | None = None, model: str | None = None) -> dict:
+    """Para a demo: SQL, resultado e uma resposta curta em português.
+
+    Os tokens incluem a chamada que redige a resposta, então são maiores que os da avaliação.
+    """
+    settings = _settings(version, model)
+    state = run(question, settings.version, settings.model)
     result = {
         "sql": state.get("sql", ""),
         "columns": state.get("columns", []),
         "rows": state.get("rows", []),
+        "truncated": state.get("truncated", False),
         "attempts": state.get("attempts", 0),
         "error": state.get("error", ""),
+        "input_tokens": state.get("input_tokens", 0),
+        "output_tokens": state.get("output_tokens", 0),
+        "version": settings.version,
+        "model": settings.model,
     }
     if result["rows"] and not result["error"]:
-        settings = get_settings()
-        if version:
-            settings = Settings(**{**settings.__dict__, "version": version})
         _, llm = _graph_for(settings)
-        msg = prompts.answer_message(
-            question, result["columns"], result["rows"], state.get("truncated", False)
-        )
+        msg = prompts.answer_message(question, result["columns"], result["rows"], result["truncated"])
         response = llm.complete(prompts.ANSWER_SYSTEM, [msg])
         result["text"] = response.text.strip()
+        result["input_tokens"] += response.input_tokens
+        result["output_tokens"] += response.output_tokens
     else:
         result["text"] = f"Não consegui responder: {result['error'] or 'sem resultado'}"
     return result

@@ -19,6 +19,16 @@ python -m agent.sql_agent "Quantos pedidos foram cancelados?"
 
 Configuração no `.env` (ou no ambiente): `OLLAMA_MODEL`, `OLLAMA_HOST`, `OLLAMA_NUM_CTX`, `AGENT_VERSION`, `MAX_ATTEMPTS`.
 
+## Demo
+
+```bash
+streamlit run app.py
+```
+
+Interface em Streamlit sobre `answer()`: a pergunta vira SQL, a SQL roda no banco somente leitura e o modelo responde em português. Para cada resposta, a demo mostra a SQL usada, a tabela de resultado, um gráfico quando o resultado é rótulo + número, e as tentativas, a latência e os tokens. Na barra lateral dá para trocar a versão do agente (v1 a v4) e o modelo instalado no Ollama, e há perguntas de exemplo do conjunto de avaliação, incluindo uma que o 7B não resolve.
+
+<!-- GIF: docs/demo.gif -->
+
 ## Arquitetura
 
 Grafo LangGraph em `agent/sql_agent.py`: **gerar** (LLM recebe schema e pergunta) → **executar** (`agent/db.py`: conexão SQLite somente leitura, só um `SELECT`, timeout) → se der erro ou resultado vazio, **corrigir** (o erro volta ao LLM) e gerar de novo, até `MAX_ATTEMPTS`.
