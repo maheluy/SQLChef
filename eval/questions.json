@@ -575,5 +575,146 @@
     "question": "Considere pedidos com status 'delivered' e data de entrega ao cliente registrada. Entre os pedidos cujo frete total (soma de freight_value dos itens do pedido) passa de 100 reais, qual é o tempo médio de entrega, da compra até a entrega ao cliente, em dias? Use 2 casas decimais.",
     "gold_sql": "SELECT ROUND(AVG(julianday(o.order_delivered_customer_date) - julianday(o.order_purchase_timestamp)), 2) FROM orders o JOIN (SELECT order_id, SUM(freight_value) AS frete FROM order_items GROUP BY order_id) i ON i.order_id = o.order_id WHERE o.order_status = 'delivered' AND o.order_delivered_customer_date IS NOT NULL AND i.frete > 100",
     "lote": 3
+  },
+  {
+    "id": "q81",
+    "difficulty": "facil",
+    "question": "Qual é a data e hora da compra mais antiga registrada nos pedidos?",
+    "gold_sql": "SELECT MIN(order_purchase_timestamp) FROM orders",
+    "lote": 4
+  },
+  {
+    "id": "q82",
+    "difficulty": "facil",
+    "question": "Quantas avaliações têm o título do comentário preenchido?",
+    "gold_sql": "SELECT COUNT(*) FROM order_reviews WHERE review_comment_title IS NOT NULL",
+    "lote": 4
+  },
+  {
+    "id": "q83",
+    "difficulty": "facil",
+    "question": "Qual é o maior número de parcelas já usado em um pagamento?",
+    "gold_sql": "SELECT MAX(payment_installments) FROM order_payments",
+    "lote": 4
+  },
+  {
+    "id": "q84",
+    "difficulty": "facil",
+    "question": "Quantos pagamentos foram feitos no boleto?",
+    "gold_sql": "SELECT COUNT(*) FROM order_payments WHERE payment_type = 'boleto'",
+    "lote": 4
+  },
+  {
+    "id": "q85",
+    "difficulty": "media",
+    "question": "Quantos pedidos não têm nenhum item registrado?",
+    "gold_sql": "SELECT COUNT(*) FROM orders WHERE order_id NOT IN (SELECT order_id FROM order_items)",
+    "lote": 4
+  },
+  {
+    "id": "q86",
+    "difficulty": "media",
+    "question": "Quantos pedidos nunca receberam avaliação?",
+    "gold_sql": "SELECT COUNT(*) FROM orders WHERE order_id NOT IN (SELECT order_id FROM order_reviews)",
+    "lote": 4
+  },
+  {
+    "id": "q87",
+    "difficulty": "media",
+    "question": "Quantos pedidos foram feitos de madrugada, ou seja, com horário de compra entre 0h e 5h59?",
+    "gold_sql": "SELECT COUNT(*) FROM orders WHERE CAST(strftime('%H', order_purchase_timestamp) AS INTEGER) < 6",
+    "lote": 4
+  },
+  {
+    "id": "q88",
+    "difficulty": "media",
+    "question": "Retorne uma linha com três colunas: a quantidade de pagamentos em 1 parcela, a quantidade em 2 a 6 parcelas e a quantidade em 7 ou mais parcelas, nessa ordem.",
+    "gold_sql": "SELECT SUM(payment_installments = 1), SUM(payment_installments BETWEEN 2 AND 6), SUM(payment_installments >= 7) FROM order_payments",
+    "strict_columns": true,
+    "lote": 4
+  },
+  {
+    "id": "q89",
+    "difficulty": "media",
+    "question": "Quantos produtos pesam mais que o peso médio de todos os produtos?",
+    "gold_sql": "SELECT COUNT(*) FROM products WHERE product_weight_g > (SELECT AVG(product_weight_g) FROM products)",
+    "lote": 4
+  },
+  {
+    "id": "q90",
+    "difficulty": "media",
+    "question": "Qual é a quantidade total de itens vendidos da categoria toys (nome em inglês)?",
+    "gold_sql": "SELECT COUNT(*) FROM order_items oi JOIN products p ON p.product_id = oi.product_id WHERE p.product_category_name_english = 'toys'",
+    "lote": 4
+  },
+  {
+    "id": "q91",
+    "difficulty": "media",
+    "question": "Quantos vendedores ficam em cidades cujo nome começa com 'sao ' (por exemplo, sao paulo)?",
+    "gold_sql": "SELECT COUNT(*) FROM sellers WHERE seller_city LIKE 'sao %'",
+    "lote": 4
+  },
+  {
+    "id": "q92",
+    "difficulty": "media",
+    "question": "Entre os pedidos com status 'delivered' e data de entrega ao cliente registrada, quantos levaram mais de 30 dias da compra até a entrega?",
+    "gold_sql": "SELECT COUNT(*) FROM orders WHERE order_status = 'delivered' AND order_delivered_customer_date IS NOT NULL AND julianday(order_delivered_customer_date) - julianday(order_purchase_timestamp) > 30",
+    "lote": 4
+  },
+  {
+    "id": "q93",
+    "difficulty": "dificil",
+    "question": "Para cada um dos estados SP, RJ e MG, qual é a segunda categoria de produto (nome em inglês) com mais itens vendidos a clientes daquele estado, ignorando itens sem categoria? Retorne o estado e a categoria.",
+    "gold_sql": "SELECT customer_state, categoria FROM (SELECT c.customer_state, p.product_category_name_english AS categoria, ROW_NUMBER() OVER (PARTITION BY c.customer_state ORDER BY COUNT(*) DESC) AS pos FROM order_items oi JOIN products p ON p.product_id = oi.product_id JOIN orders o ON o.order_id = oi.order_id JOIN customers c ON c.customer_id = o.customer_id WHERE c.customer_state IN ('SP', 'RJ', 'MG') AND p.product_category_name_english IS NOT NULL GROUP BY c.customer_state, p.product_category_name_english) WHERE pos = 2",
+    "lote": 4
+  },
+  {
+    "id": "q94",
+    "difficulty": "dificil",
+    "question": "Comparando janeiro a agosto de 2017 com janeiro a agosto de 2018 (pela data de compra), qual foi o crescimento percentual do número de pedidos? Responda em escala de 0 a 100, com 2 casas decimais.",
+    "gold_sql": "SELECT ROUND(100.0 * (SUM(strftime('%Y', order_purchase_timestamp) = '2018') - SUM(strftime('%Y', order_purchase_timestamp) = '2017')) / SUM(strftime('%Y', order_purchase_timestamp) = '2017'), 2) FROM orders WHERE strftime('%m', order_purchase_timestamp) BETWEEN '01' AND '08'",
+    "lote": 4
+  },
+  {
+    "id": "q95",
+    "difficulty": "dificil",
+    "question": "Entre os clientes únicos (customer_unique_id) com mais de um pedido, qual é a média de dias entre a primeira e a última compra? Use 2 casas decimais.",
+    "gold_sql": "SELECT ROUND(AVG(dias), 2) FROM (SELECT c.customer_unique_id, julianday(MAX(o.order_purchase_timestamp)) - julianday(MIN(o.order_purchase_timestamp)) AS dias FROM orders o JOIN customers c ON c.customer_id = o.customer_id GROUP BY c.customer_unique_id HAVING COUNT(*) > 1)",
+    "lote": 4
+  },
+  {
+    "id": "q96",
+    "difficulty": "dificil",
+    "question": "Considere pedidos com status 'delivered', entregues ao cliente mais de 10 dias depois da data estimada e que têm pelo menos uma avaliação. Que percentual desses pedidos tem alguma avaliação com nota 1? Responda em escala de 0 a 100, com 2 casas decimais.",
+    "gold_sql": "SELECT ROUND(100.0 * COUNT(DISTINCT CASE WHEN r.review_score = 1 THEN o.order_id END) / COUNT(DISTINCT o.order_id), 2) FROM orders o JOIN order_reviews r ON r.order_id = o.order_id WHERE o.order_status = 'delivered' AND o.order_delivered_customer_date IS NOT NULL AND julianday(o.order_delivered_customer_date) - julianday(o.order_estimated_delivery_date) > 10",
+    "lote": 4
+  },
+  {
+    "id": "q97",
+    "difficulty": "dificil",
+    "question": "Quantos clientes únicos (customer_unique_id) compraram em 2017 e não voltaram a comprar em 2018 (pela data de compra)?",
+    "gold_sql": "SELECT COUNT(*) FROM (SELECT c.customer_unique_id FROM orders o JOIN customers c ON c.customer_id = o.customer_id WHERE strftime('%Y', o.order_purchase_timestamp) = '2017' EXCEPT SELECT c.customer_unique_id FROM orders o JOIN customers c ON c.customer_id = o.customer_id WHERE strftime('%Y', o.order_purchase_timestamp) = '2018')",
+    "lote": 4
+  },
+  {
+    "id": "q98",
+    "difficulty": "dificil",
+    "question": "Qual é a receita de itens (soma de price) dos pedidos que tiveram pelo menos um pagamento com voucher? Use 2 casas decimais.",
+    "gold_sql": "SELECT ROUND(SUM(price), 2) FROM order_items WHERE order_id IN (SELECT order_id FROM order_payments WHERE payment_type = 'voucher')",
+    "lote": 4
+  },
+  {
+    "id": "q99",
+    "difficulty": "dificil",
+    "question": "Quantos vendedores com pelo menos 50 itens vendidos têm frete médio por item acima de 30 reais?",
+    "gold_sql": "SELECT COUNT(*) FROM (SELECT seller_id FROM order_items GROUP BY seller_id HAVING COUNT(*) >= 50 AND AVG(freight_value) > 30)",
+    "lote": 4
+  },
+  {
+    "id": "q100",
+    "difficulty": "dificil",
+    "question": "Em 2017, qual mês (formato AAAA-MM, pela data de compra) teve o maior aumento no número de pedidos em relação ao mês anterior? Retorne o mês e o aumento (diferença em número de pedidos).",
+    "gold_sql": "SELECT mes, n - anterior FROM (SELECT strftime('%Y-%m', order_purchase_timestamp) AS mes, COUNT(*) AS n, LAG(COUNT(*)) OVER (ORDER BY strftime('%Y-%m', order_purchase_timestamp)) AS anterior FROM orders WHERE strftime('%Y', order_purchase_timestamp) = '2017' GROUP BY mes) WHERE anterior IS NOT NULL ORDER BY n - anterior DESC LIMIT 1",
+    "lote": 4
   }
 ]

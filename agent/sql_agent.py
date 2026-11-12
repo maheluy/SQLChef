@@ -7,6 +7,9 @@ Versões (para a tabela comparativa):
     v4  v3 + dica de schema na correção (em quais tabelas está a coluna que não existe)
     v5  v4 + notas de semântica do schema no prompt + checagem de formato do resultado
         (pergunta pede um valor e voltou uma linha por grupo -> correção)
+    v6  v5 + revisão: com a SQL rodando, o LLM (em contexto separado) confere pergunta, SQL e
+        resultado; se apontar um problema, ele vai para a correção (uma revisão por pergunta;
+        se a SQL revisada falhar, volta ao resultado anterior)
 
 O LLM roda localmente no Ollama; o modelo vem de OLLAMA_MODEL no ambiente/.env.
 
@@ -44,14 +47,24 @@ class AgentState(TypedDict, total=False):
     truncated: bool
     input_tokens: int
     output_tokens: int
+    # v6
+    reviewed: bool
+    review: str  # "" sem revisão, "OK" ou o problema apontado
+    review_bonus: int  # geração extra concedida pela revisão (não conta em MAX_ATTEMPTS)
+    review_reverted: bool  # a SQL revisada falhou e o resultado anterior foi restaurado
+    pre_review_sql: str
+    pre_review_columns: list
+    pre_review_rows: list
+    pre_review_truncated: bool
 
 
 def _build_graph(settings: Settings):
     llm = get_llm(settings)
-    few_shot = settings.version in ("v2", "v3", "v4", "v5")
-    retry = settings.version in ("v3", "v4", "v5")
-    hints = settings.version in ("v4", "v5")
-    notes = shape = settings.version == "v5"
+    few_shot = settings.version in ("v2", "v3", "v4", "v5", "v6")
+    retry = settings.version in ("v3", "v4", "v5", "v6")
+    hints = settings.version in ("v4", "v5", "v6")
+    notes = shape = settings.version in ("v5", "v6")
+    review = settings.version == "v6"
     max_attempts = settings.max_attempts if retry else 1
     system = prompts.system_prompt(few_shot, notes)
 
@@ -92,19 +105,63 @@ def _build_graph(settings: Settings):
         hint = prompts.schema_hint(problem) if hints else ""
         return {"messages": [prompts.repair_message(state["sql"], problem, hint)]}
 
-    def should_retry(state: AgentState) -> str:
-        if (state.get("error") or state.get("suspect")) and state["attempts"] < max_attempts:
+    def route(state: AgentState) -> str:
+        limit = max_attempts + state.get("review_bonus", 0)
+        if (state.get("error") or state.get("suspect")) and state["attempts"] < limit:
             return "repair"
-        return END
+        if review and not state.get("reviewed") and state.get("rows") and not state.get("error"):
+            return "review"
+        return "finalize"
+
+    def review_node(state: AgentState) -> dict:
+        msg = prompts.review_message(
+            state["question"], state["sql"], state["columns"], state["rows"], state.get("truncated", False)
+        )
+        response = llm.complete(prompts.review_system(), [msg])
+        problem = prompts.parse_review(response.text)
+        return {
+            "reviewed": True,
+            "review": problem or "OK",
+            "suspect": problem,
+            "review_bonus": 1 if problem else 0,
+            "pre_review_sql": state["sql"],
+            "pre_review_columns": state["columns"],
+            "pre_review_rows": state["rows"],
+            "pre_review_truncated": state.get("truncated", False),
+            "input_tokens": state.get("input_tokens", 0) + response.input_tokens,
+            "output_tokens": state.get("output_tokens", 0) + response.output_tokens,
+        }
+
+    def after_review(state: AgentState) -> str:
+        return "repair" if state.get("suspect") else "finalize"
+
+    def finalize(state: AgentState) -> dict:
+        """A revisão nunca troca uma resposta que roda por um erro ou por um resultado vazio."""
+        revised_failed = state.get("error") or not state.get("rows")
+        if state.get("review_bonus") and state.get("pre_review_sql") and revised_failed:
+            return {
+                "sql": state["pre_review_sql"],
+                "columns": state["pre_review_columns"],
+                "rows": state["pre_review_rows"],
+                "truncated": state.get("pre_review_truncated", False),
+                "error": "",
+                "suspect": "",
+                "review_reverted": True,
+            }
+        return {}
 
     graph = StateGraph(AgentState)
     graph.add_node("generate", generate)
     graph.add_node("execute", execute)
     graph.add_node("repair", repair)
+    graph.add_node("review", review_node)
+    graph.add_node("finalize", finalize)
     graph.add_edge(START, "generate")
     graph.add_edge("generate", "execute")
-    graph.add_conditional_edges("execute", should_retry, ["repair", END])
+    graph.add_conditional_edges("execute", route, ["repair", "review", "finalize"])
+    graph.add_conditional_edges("review", after_review, ["repair", "finalize"])
     graph.add_edge("repair", "generate")
+    graph.add_edge("finalize", END)
     return graph.compile(), llm
 
 
@@ -132,6 +189,9 @@ def _for_eval(state: AgentState) -> dict:
         "input_tokens": state.get("input_tokens", 0),
         "output_tokens": state.get("output_tokens", 0),
         "attempts": state.get("attempts", 0),
+        "review": state.get("review", ""),
+        "review_reverted": state.get("review_reverted", False),
+        "pre_review_sql": state.get("pre_review_sql", ""),
     }
 
 
@@ -160,6 +220,10 @@ def generate_sql_v5(question: str) -> dict:
     return _for_eval(run(question, "v5"))
 
 
+def generate_sql_v6(question: str) -> dict:
+    return _for_eval(run(question, "v6"))
+
+
 def answer(question: str, version: str | None = None, model: str | None = None) -> dict:
     """Para a demo: SQL, resultado e uma resposta curta em português.
 
@@ -175,6 +239,8 @@ def answer(question: str, version: str | None = None, model: str | None = None) 
         "attempts": state.get("attempts", 0),
         "error": state.get("error", ""),
         "suspect": state.get("suspect", ""),
+        "review": state.get("review", ""),
+        "review_reverted": state.get("review_reverted", False),
         "input_tokens": state.get("input_tokens", 0),
         "output_tokens": state.get("output_tokens", 0),
         "version": settings.version,

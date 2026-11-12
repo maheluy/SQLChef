@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env", override=False)
 
-VERSIONS = ("v1", "v2", "v3", "v4", "v5")
+VERSIONS = ("v1", "v2", "v3", "v4", "v5", "v6")
 
 
 @dataclass(frozen=True)

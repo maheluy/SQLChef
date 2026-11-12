@@ -25,15 +25,15 @@ Configuração no `.env` (ou no ambiente): `OLLAMA_MODEL`, `OLLAMA_HOST`, `OLLAM
 streamlit run app.py
 ```
 
-Interface em Streamlit sobre `answer()`: a pergunta vira SQL, a SQL roda no banco somente leitura e o modelo responde em português. Para cada resposta, a demo mostra a SQL usada, a tabela de resultado, um gráfico quando o resultado é rótulo + número, e as tentativas, a latência e os tokens. Na barra lateral dá para trocar a versão do agente (v1 a v5) e o modelo instalado no Ollama, e há perguntas de exemplo do conjunto de avaliação, incluindo uma que o 7B não resolve.
+Interface em Streamlit sobre `answer()`: a pergunta vira SQL, a SQL roda no banco somente leitura e o modelo responde em português. Para cada resposta, a demo mostra a SQL usada, a tabela de resultado, um gráfico quando o resultado é rótulo + número, e as tentativas, a latência e os tokens. Na barra lateral dá para trocar a versão do agente (v1 a v6) e o modelo instalado no Ollama, e há perguntas de exemplo do conjunto de avaliação, incluindo uma que o 7B não resolve.
 
 <!-- GIF: docs/demo.gif -->
 
 ## Arquitetura
 
-Grafo LangGraph em `agent/sql_agent.py`: **gerar** (LLM recebe schema e pergunta) → **executar** (`agent/db.py`: conexão SQLite somente leitura, só um `SELECT`, timeout) → se der erro ou resultado vazio (na v5, também resultado com formato suspeito), **corrigir** (o problema volta ao LLM) e gerar de novo, até `MAX_ATTEMPTS`.
+Grafo LangGraph em `agent/sql_agent.py`: **gerar** (LLM recebe schema e pergunta) → **executar** (`agent/db.py`: conexão SQLite somente leitura, só um `SELECT`, timeout) → se der erro ou resultado vazio (na v5, também resultado com formato suspeito), **corrigir** (o problema volta ao LLM) e gerar de novo, até `MAX_ATTEMPTS`. Na v6, quando a SQL roda, um nó de **revisão** confere pergunta, SQL e resultado antes de terminar.
 
-Cinco versões para comparação, cada uma acumulando as anteriores:
+Seis versões para comparação, cada uma acumulando as anteriores:
 
 | Versão | O que muda |
 |---|---|
@@ -42,6 +42,7 @@ Cinco versões para comparação, cada uma acumulando as anteriores:
 | `v3` | + autocorreção com retry |
 | `v4` | + dica de schema na correção: se a coluna não existe, diz em quais tabelas ela está e mostra as colunas delas |
 | `v5` | + notas de semântica do schema no prompt (o que identifica cada linha, onde há várias linhas por pedido, que `order_item_id` é posição e não quantidade, divisão inteira) + checagem de formato: se a pergunta pede um único valor ("Quantos...") e voltaram várias linhas, o resultado vai para a correção mesmo sem erro |
+| `v6` | + revisão: com a SQL rodando, o LLM, em um contexto separado do gerador, recebe a pergunta, a SQL e as primeiras linhas do resultado e responde `OK` ou `PROBLEMA: ...` seguindo uma lista de verificação (condições, entidade contada, nível de agregação, formato, plausibilidade). Um problema vai para a correção. Há uma revisão por pergunta, e se a SQL revisada falhar o agente volta ao resultado anterior |
 
 `agent/llm.py` isola o cliente do Ollama e registra os tokens de cada chamada; trocar de modelo é só mudar `OLLAMA_MODEL`.
 
@@ -56,40 +57,44 @@ Regras de comparação (`eval/run_eval.py`):
 - a ordem das colunas só importa nas perguntas marcadas `strict_columns`;
 - colunas a mais ou a menos contam como erro, porque a pergunta diz o que retornar.
 
-**Conjunto de teste:** 80 perguntas em português (21 fáceis, 37 médias, 22 difíceis) em `eval/questions.json`, cada uma com a SQL de referência, em três lotes:
+**Conjunto de teste:** 100 perguntas em português (25 fáceis, 45 médias, 30 difíceis) em `eval/questions.json`, cada uma com a SQL de referência, em quatro lotes:
 - **Lote 1 (q01–q22):** usado para desenvolver as versões v2–v4.
 - **Lote 2 (q23–q60):** escrito só a partir do schema, sem ver respostas do modelo. Serve para checar se as melhorias valem para perguntas que não influenciaram o desenvolvimento. Depois foi inspecionado para a análise de erros que originou a v5.
 - **Lote 3 (q61–q80):** escrito antes de rodar a v5, para medi-la em perguntas que ela não viu.
+- **Lote 4 (q81–q100):** escrito antes de implementar a v6, com conceitos que os outros lotes quase não cobrem e redações variadas: negação e anti-join ("nunca receberam avaliação"), hora do dia (comparar texto com número dá zero), pivô com `CASE`, comparação com a média geral, `LIKE`, ranking por grupo e `LAG` (funções de janela), comparação entre períodos, `EXCEPT`, e pistas que puxam para a coluna errada ("quantidade total de itens" sugere `SUM(order_item_id)`).
 
 Os exemplos few-shot não repetem nenhuma pergunta de teste.
 
 ```bash
-python eval/run_eval.py --validate-gold                     # as 80 SQLs de referência rodam e não vêm vazias
-python eval/run_eval.py --agent agent.sql_agent:generate_sql_v5 --label qwen7b_v5_80
-OLLAMA_MODEL=qwen2.5-coder:14b python eval/run_eval.py --agent agent.sql_agent:generate_sql_v5 --label qwen14b_v5_80
-python eval/run_eval.py --agent agent.sql_agent:generate_sql_v5 --lote 3 --label so_lote3
+python eval/run_eval.py --validate-gold                     # as 100 SQLs de referência rodam e não vêm vazias
+python eval/run_eval.py --agent agent.sql_agent:generate_sql_v6 --label qwen7b_v6_100
+OLLAMA_MODEL=qwen2.5-coder:14b python eval/run_eval.py --agent agent.sql_agent:generate_sql_v6 --label qwen14b_v6_100
+python eval/run_eval.py --agent agent.sql_agent:generate_sql_v5 --lote 4 --label qwen7b_v5_l4
+python eval/review_stats.py eval/results/qwen7b_v6_100.csv  # o que o revisor salvou, estragou ou não mudou
 ```
 
 Resultados em `eval/results/<label>.csv` (por pergunta: acerto, SQL gerada, tentativas, tokens, latência) e `<label>_summary.json` (acurácia por dificuldade e por lote, e a configuração da rodada).
 
 ## Resultados
 
-Ollama local com temperatura 0, GPU AMD Radeon (Navi 33, ~8 GB de VRAM). As colunas Fácil, Média e Difícil se referem aos lotes 1+2 (16, 28 e 16 perguntas); o lote 3 tem 5 fáceis, 9 médias e 6 difíceis. Latência e tokens são médias por pergunta.
+Ollama local com temperatura 0, GPU AMD Radeon (Navi 33, ~8 GB de VRAM). As colunas Fácil, Média e Difícil se referem aos lotes 1+2 (16, 28 e 16 perguntas); o lote 3 tem 5 fáceis, 9 médias e 6 difíceis, e o lote 4, 4 fáceis, 8 médias e 8 difíceis. Latência e tokens são médias por pergunta nos lotes 1 a 3.
 
-| Modelo | Versão | Lotes 1+2 (60) | Fácil | Média | Difícil | Lote 3 (20, inédito) | Latência | Tokens |
-|---|---|---|---|---|---|---|---|---|
-| qwen2.5-coder:7b | v1 | 44/60 (73,3%) | 16/16 | 23/28 | 5/16 | 11/20 | 1,1 s | 1.481 |
-| qwen2.5-coder:7b | v2 | 46/60 (76,7%) | 16/16 | 25/28 | 5/16 | 12/20 | 1,0 s | 1.975 |
-| qwen2.5-coder:7b | v3 | 49/60 (81,7%) | 16/16 | 27/28 | 6/16 | 12/20 | 1,4 s | 2.439 |
-| qwen2.5-coder:7b | v4 | 49/60 (81,7%) | 16/16 | 27/28 | 6/16 | 13/20 | 1,4 s | 2.390 |
-| qwen2.5-coder:7b | v5 | 51/60 (85,0%) | 16/16 | 27/28 | 8/16 | 14/20 | 1,3 s | 2.825 |
-| qwen2.5-coder:14b | v1 | 48/60 (80,0%) | 16/16 | 27/28 | 5/16 | 12/20 | 6,6 s | 1.483 |
-| qwen2.5-coder:14b | v2 | 52/60 (86,7%) | 16/16 | 27/28 | 9/16 | 14/20 | 6,2 s | 1.976 |
-| qwen2.5-coder:14b | v3 | 52/60 (86,7%) | 16/16 | 27/28 | 9/16 | 15/20 | 7,4 s | 2.115 |
-| qwen2.5-coder:14b | v4 | 52/60 (86,7%) | 16/16 | 27/28 | 9/16 | 15/20 | 7,7 s | 2.092 |
-| qwen2.5-coder:14b | **v5** | **55/60 (91,7%)** | 16/16 | 27/28 | **12/16** | **19/20** | 5,8 s | 2.306 |
+| Modelo | Versão | Lotes 1+2 (60) | Fácil | Média | Difícil | Lote 3 (20) | Lote 4 (20) | Latência | Tokens |
+|---|---|---|---|---|---|---|---|---|---|
+| qwen2.5-coder:7b | v1 | 44/60 (73,3%) | 16/16 | 23/28 | 5/16 | 11/20 | 13/20 | 1,1 s | 1.481 |
+| qwen2.5-coder:7b | v2 | 46/60 (76,7%) | 16/16 | 25/28 | 5/16 | 12/20 | 12/20 | 1,0 s | 1.975 |
+| qwen2.5-coder:7b | v3 | 49/60 (81,7%) | 16/16 | 27/28 | 6/16 | 12/20 | 12/20 | 1,4 s | 2.439 |
+| qwen2.5-coder:7b | v4 | 49/60 (81,7%) | 16/16 | 27/28 | 6/16 | 13/20 | 12/20 | 1,4 s | 2.390 |
+| qwen2.5-coder:7b | v5 | 51/60 (85,0%) | 16/16 | 27/28 | 8/16 | 14/20 | 11/20 | 1,3 s | 2.825 |
+| qwen2.5-coder:7b | v6 | 51/60 (85,0%) | 16/16 | 27/28 | 8/16 | 14/20 | 11/20 | 2,0 s | 5.031 |
+| qwen2.5-coder:14b | v1 | 48/60 (80,0%) | 16/16 | 27/28 | 5/16 | 12/20 | – | 6,6 s | 1.483 |
+| qwen2.5-coder:14b | v2 | 52/60 (86,7%) | 16/16 | 27/28 | 9/16 | 14/20 | – | 6,2 s | 1.976 |
+| qwen2.5-coder:14b | v3 | 52/60 (86,7%) | 16/16 | 27/28 | 9/16 | 15/20 | – | 7,4 s | 2.115 |
+| qwen2.5-coder:14b | v4 | 52/60 (86,7%) | 16/16 | 27/28 | 9/16 | 15/20 | – | 7,7 s | 2.092 |
+| qwen2.5-coder:14b | **v5** | **55/60 (91,7%)** | 16/16 | 27/28 | **12/16** | **19/20** | – | 5,8 s | 2.306 |
+| qwen2.5-coder:14b | v6 | – | | | | – | – | | |
 
-Todas as linhas vêm de rodadas com as 80 perguntas (`eval/results/qwen{7b,14b}_v*_80`).
+Lotes 1 a 3 de v1 a v5 vêm das rodadas com 80 perguntas (`qwen{7b,14b}_v*_80`); o lote 4 de v1 a v5, de rodadas só com ele (`*_l4`); a v6, de uma rodada com as 100 (`*_v6_100`). Falta rodar o 14B no lote 4 e na v6.
 
 O que os números mostram:
 - **Exemplos e autocorreção ajudam, inclusive em perguntas inéditas.** No 7B, de v1 para v3 são 5 acertos a mais nos lotes 1+2, quase todos nas perguntas médias (de 23 para 27 de 28); as fáceis já estavam no máximo.
@@ -99,6 +104,8 @@ O que os números mostram:
 - **No lote 3, que a v5 não viu, o resultado depende do modelo.** O 14B vai de 15 para 19 de 20, sem perder nenhuma pergunta; o 7B vai só de 13 para 14. O ganho nas perguntas inéditas mostra que as notas não estão apenas decoradas para as falhas dos lotes 1 e 2, mas o 7B aproveita bem menos delas.
 - **No 14B, o ganho vem das notas, não da checagem.** Só uma pergunta passou por nova tentativa na v5 (contra três na v4); todas as perguntas recuperadas acertam já na primeira geração. Por isso a v5 é até mais rápida que a v4 no 14B. As notas acrescentam ~400 tokens ao prompt.
 - Com 20 perguntas, cada uma vale 5 pontos percentuais no lote 3, então o número é indicativo, não conclusivo.
+- **No lote 4, as técnicas não ajudam o 7B:** ele acerta 13 de 20 na v1 e 11 na v5. A diferença está em duas perguntas difíceis: na q96 a v5 passou a contar avaliações em vez de pedidos, e na q100 escreveu `strftime('%Y-%m')` sem a coluna de data. As 7 perguntas que nenhuma versão acerta usam conceitos novos: ranking por grupo (q93), comparação entre períodos (q94), primeira e última compra do cliente (q95), `EXCEPT` (q97), JOIN que duplica valores (q98), `HAVING` com dois critérios (q99) e a armadilha de `order_item_id` (q90).
+- **No 7B, a revisão (v6) não mudou nenhum acerto** e custa +0,7 s e quase o dobro de tokens por pergunta (ver "O que a v6 mudou").
 
 ## Análise de erros
 
@@ -164,8 +171,29 @@ Falhas do 7B na v5 no lote 3 (6 de 20), quase todas de leitura da pergunta, que 
 
 No 7B, os erros de q76 a q80 mostram o limite de corrigir com regras: o modelo responde uma pergunta parecida com a feita. Pegar isso, e os erros de granularidade que sobram no 14B, exigiria comparar a SQL com a pergunta, por exemplo pedindo ao LLM que revise a consulta e o resultado antes de responder.
 
+### O que a v6 mudou
+
+A v6 testa se o próprio modelo consegue pegar os erros silenciosos que sobram, revisando a SQL e o resultado contra a pergunta. Efeito do revisor no 7B, medido com `eval/review_stats.py`:
+
+| Revisor (7B, 100 perguntas) | Perguntas |
+|---|---|
+| Revisadas (a SQL rodou) | 97 |
+| Apontou problema | 9 |
+| Apontou problema numa resposta certa | 0 |
+| Resposta errada → certa depois da revisão | 0 |
+| Resposta errada que ele aprovou | 12 |
+| Resposta errada sem revisão (a SQL dava erro ou voltava vazia) | 3 |
+
+- **Quando o revisor aponta um problema, ele acerta.** As 9 respostas que ele marcou estavam todas erradas, e as descrições batem com o erro real. Exemplos: "não verifica se os clientes fizeram pedidos tanto em 2017 quanto em 2018" (q50), "calcula o tempo médio de SP em vez da diferença" (q52), "não considera os meses de janeiro a agosto" (q94).
+- **Mas o 7B não consegue corrigir o que o revisor apontou.** Nenhuma das 9 virou acerto. Em uma (q51) a SQL corrigida falhou e o agente voltou à anterior.
+- **E ele aprova a maioria dos erros**, inclusive os que as notas descrevem: `SUM(order_item_id)` como quantidade de itens (q90) e o JOIN de itens com pagamentos que duplica a receita (q98).
+- **Custo:** uma chamada a mais por pergunta, com o schema e as notas no prompt do revisor: +0,7 s e de ~2.800 para ~5.000 tokens por pergunta no 7B.
+
+Para o 7B, a revisão não compensa: ela sabe diagnosticar alguns erros, mas o mesmo modelo não sabe consertá-los.
+
 ## Limitações
 
 - **80 perguntas é pouco.** Nos lotes 1+2 cada pergunta vale 1,7 ponto percentual, e no lote 3, 5 pontos. Diferenças de uma ou duas perguntas entre versões não são conclusivas.
 - **Temperatura 0 não garante resultado idêntico.** Repetir v1 a v4 nas 60 perguntas antigas deu os mesmos acertos no 14B; no 7B mudou uma pergunta (a q51, de errada para certa na v3 e na v4). Uma rodada por configuração não mede essa variação.
-- **Os lotes 1 e 2 já foram inspecionados.** As notas da v5 foram escritas a partir dessas falhas, por isso o número que conta para a v5 é o do lote 3. O lote 3 agora também foi inspecionado; uma técnica nova precisaria de perguntas novas.
+- **Os lotes 1 e 2 já foram inspecionados.** As notas da v5 foram escritas a partir dessas falhas, por isso o número que conta para a v5 é o do lote 3, e o da v6 é o do lote 4. Os lotes 3 e 4 agora também foram inspecionados; uma técnica nova precisaria de perguntas novas.
+- **Perguntas, notas e revisor foram escritos pela mesma pessoa.** Mesmo escrevendo cada lote antes de rodar a versão nova, quem escreve as perguntas sabe quais armadilhas o agente conhece.

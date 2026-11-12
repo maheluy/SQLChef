@@ -1,0 +1,66 @@
+{
+  "geral": {
+    "n": 100,
+    "acertos": 81,
+    "acuracia": 0.81,
+    "latencia_media_s": 6.49,
+    "tokens_medios": 1980
+  },
+  "facil": {
+    "n": 25,
+    "acertos": 25,
+    "acuracia": 1.0,
+    "latencia_media_s": 2.941,
+    "tokens_medios": 1931
+  },
+  "media": {
+    "n": 45,
+    "acertos": 42,
+    "acuracia": 0.9333,
+    "latencia_media_s": 5.199,
+    "tokens_medios": 1967
+  },
+  "dificil": {
+    "n": 30,
+    "acertos": 14,
+    "acuracia": 0.4667,
+    "latencia_media_s": 11.383,
+    "tokens_medios": 2042
+  },
+  "lote1": {
+    "n": 22,
+    "acertos": 20,
+    "acuracia": 0.9091,
+    "latencia_media_s": 7.228,
+    "tokens_medios": 1993
+  },
+  "lote2": {
+    "n": 38,
+    "acertos": 32,
+    "acuracia": 0.8421,
+    "latencia_media_s": 5.969,
+    "tokens_medios": 1973
+  },
+  "lote3": {
+    "n": 20,
+    "acertos": 14,
+    "acuracia": 0.7,
+    "latencia_media_s": 4.832,
+    "tokens_medios": 1963
+  },
+  "lote4": {
+    "n": 20,
+    "acertos": 15,
+    "acuracia": 0.75,
+    "latencia_media_s": 8.324,
+    "tokens_medios": 1998
+  },
+  "config": {
+    "agent": "agent.sql_agent:generate_sql_v2",
+    "data": "2026-11-11T20:10:04",
+    "provider": "ollama",
+    "model": "qwen2.5-coder:14b",
+    "version": "v2",
+    "num_ctx": 8192
+  }
+}

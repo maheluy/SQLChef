@@ -24,6 +24,7 @@ VERSION_INFO = {
     "v3": "+ autocorreção com retry",
     "v4": "+ dica de schema na correção",
     "v5": "+ notas de schema e checagem de formato",
+    "v6": "+ revisão da SQL e do resultado",
 }
 
 QUESTIONS_PATH = Path(__file__).resolve().parent / "eval" / "questions.json"
@@ -155,6 +156,9 @@ def render(turn: dict) -> None:
         st.warning(result["text"])
     else:
         st.markdown(result["text"])
+        if result.get("review"):
+            note = " A SQL revisada falhou; mantida a anterior." if result.get("review_reverted") else ""
+            st.caption(f"Revisão: {result['review']}{note}")
         if result.get("suspect"):
             st.warning(f"Resultado com formato suspeito mesmo após as tentativas: {result['suspect']}")
 

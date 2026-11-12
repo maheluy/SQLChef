@@ -126,7 +126,10 @@ def evaluate(questions, agent_fn, label):
             "input_tokens": "",
             "output_tokens": "",
             "attempts": "",
+            "review": "",
+            "review_reverted": "",
             "generated_sql": "",
+            "pre_review_sql": "",
             "question": q["question"],
         }
         start = time.perf_counter()
@@ -142,8 +145,9 @@ def evaluate(questions, agent_fn, label):
 
         if isinstance(answer, dict):
             sql = answer.get("sql", "")
-            for key in ("input_tokens", "output_tokens", "attempts"):
+            for key in ("input_tokens", "output_tokens", "attempts", "review", "review_reverted"):
                 record[key] = answer.get(key, "")
+            record["pre_review_sql"] = " ".join((answer.get("pre_review_sql") or "").split())
         else:
             sql = answer
         record["generated_sql"] = " ".join((sql or "").split())
@@ -191,7 +195,7 @@ def summarize(records):
         if diff in by_diff:
             summary[diff] = block(by_diff[diff])
     # lote 1 = q01-q22 (usadas para desenhar v2-v4); lote 2 = q23-q60 (inéditas até a v4);
-    # lote 3 = q61-q80 (escritas antes da v5, para medi-la)
+    # lote 3 = q61-q80 (escritas antes da v5); lote 4 = q81-q100 (escritas antes da v6)
     for lote in sorted({r["lote"] for r in records if r["lote"] != ""}):
         summary[f"lote{lote}"] = block([r for r in records if r["lote"] == lote])
     return summary
@@ -243,7 +247,7 @@ def main():
     parser.add_argument("--label", help="nome desta rodada (padrão: função + data/hora)")
     parser.add_argument("--difficulty", choices=["facil", "media", "dificil"])
     parser.add_argument("--limit", type=int)
-    parser.add_argument("--lote", type=int, help="1 = q01-q22, 2 = q23-q60, 3 = q61-q80")
+    parser.add_argument("--lote", type=int, help="1 = q01-q22, 2 = q23-q60, 3 = q61-q80, 4 = q81-q100")
     args = parser.parse_args()
 
     questions = load_questions(args.questions, args.difficulty, args.limit, args.lote)

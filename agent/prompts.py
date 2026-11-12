@@ -188,6 +188,72 @@ def repair_message(sql: str, error: str, hint: str = "") -> dict:
     }
 
 
+REVIEW_INSTRUCTIONS = """Você revisa consultas SQL escritas por outra pessoa para um banco SQLite \
+com dados públicos da Olist, um marketplace brasileiro de e-commerce. Você recebe a pergunta, a \
+consulta e o resultado dela, e decide se a consulta responde exatamente à pergunta.
+
+Verifique, nesta ordem:
+1. Condições: todas as condições da pergunta estão na consulta (anos, meses, status, estados, \
+"mais de um", "pelo menos", "tanto... quanto", "não", "nunca")? Nenhuma condição foi inventada?
+2. Entidade: a consulta conta ou soma aquilo que a pergunta pede (pedidos, itens, pagamentos, \
+avaliações, clientes únicos, vendedores)? Falta ou sobra DISTINCT?
+3. Agregação: o cálculo está no nível certo? Ex.: valor por pedido somado antes da média; JOIN \
+entre tabelas com várias linhas por pedido que multiplica linhas e infla somas ou contagens.
+4. Formato: as colunas devolvidas são as que a pergunta pede, na ordem pedida, e é um único valor \
+quando a pergunta pede um único valor?
+5. Plausibilidade: o resultado faz sentido? Ex.: percentual exatamente 0 ou 100, média que saiu \
+inteira por divisão entre inteiros, contagem maior que o total de registros da tabela.
+
+Responda em uma linha, em um destes formatos:
+OK
+PROBLEMA: <o erro concreto e como corrigir>
+
+Responda OK sempre que não encontrar um erro concreto. Não aponte problema por estilo, nomes de \
+colunas, arredondamento pedido na pergunta ou formas diferentes de escrever a mesma consulta.
+
+Schema (com uma linha de exemplo por tabela):
+"""
+
+REVIEW_PREVIEW_ROWS = 10
+
+
+@lru_cache(maxsize=None)
+def review_system() -> str:
+    """Prompt do revisor (v6): contexto separado do gerador, com schema e notas."""
+    return "\n".join([REVIEW_INSTRUCTIONS, schema_prompt(sample_rows=1), SCHEMA_NOTES])
+
+
+def review_message(question: str, sql: str, columns: list, rows: list, truncated: bool) -> dict:
+    preview = "\n".join(" | ".join(str(v) for v in row) for row in rows[:REVIEW_PREVIEW_ROWS])
+    n = f"mais de {len(rows)}" if truncated else str(len(rows))
+    shown = f" (mostrando {REVIEW_PREVIEW_ROWS})" if len(rows) > REVIEW_PREVIEW_ROWS else ""
+    return {
+        "role": "user",
+        "content": (
+            f"Pergunta: {question}\n\nConsulta:\n```sql\n{sql}\n```\n\n"
+            f"Resultado: {n} linha(s){shown}\nColunas: {', '.join(columns)}\n{preview}"
+        ),
+    }
+
+
+_REVIEW_PROBLEM = re.compile(r"^[\W_]*problema[\W_]*", re.IGNORECASE)
+
+
+def parse_review(text: str) -> str:
+    """Devolve o problema apontado pelo revisor, ou "" para OK.
+
+    Decide pela primeira linha não vazia; o problema é o texto a partir dela (até 600 caracteres).
+    Qualquer coisa fora do formato conta como OK (conservador: uma resposta que não se entende
+    não deve disparar uma correção).
+    """
+    text = (text or "").strip()
+    first = next((line for line in text.splitlines() if line.strip()), "")
+    if not (m := _REVIEW_PROBLEM.match(first)):
+        return ""
+    problem = text[text.index(first) + m.end():].strip()
+    return problem[:600] or "o revisor apontou um problema sem descrevê-lo"
+
+
 ANSWER_SYSTEM = (
     "Você responde em português, em uma ou duas frases, a pergunta do usuário usando apenas "
     "o resultado da consulta fornecido. Não invente números. Se o resultado estiver truncado, diga isso."
