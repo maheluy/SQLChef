@@ -1,5 +1,16 @@
 # SQLChef
-Agente text-to-SQL que responde em português a perguntas sobre dados reais de um marketplace brasileiro (dataset público da Olist), gerando, executando e corrigindo consultas SQL em um banco SQLite.
+
+Agente text-to-SQL que responde em português a perguntas sobre dados reais de um marketplace brasileiro (dataset público da [Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)). Ele lê o schema, gera uma consulta SQL, executa em um SQLite somente leitura, corrige a própria consulta quando algo dá errado e responde mostrando a SQL usada.
+
+O projeto tem duas partes: o **agente** (seis versões, cada uma acrescentando uma técnica) e uma **avaliação objetiva** com 100 perguntas, que mede o que cada técnica realmente melhora em dois modelos locais. A avaliação é, na prática, o resultado principal: o agente é pequeno, e o que se aprende vem de medir onde ele erra.
+
+- [Como rodar](#como-rodar)
+- [Demo](#demo)
+- [Como o agente funciona](#como-o-agente-funciona)
+- [Como o projeto foi desenvolvido](#como-o-projeto-foi-desenvolvido)
+- [Experimentos](#experimentos)
+- [Análise dos resultados](#análise-dos-resultados)
+- [Limitações](#limitações)
 
 ## Como rodar
 
@@ -7,6 +18,7 @@ Agente text-to-SQL que responde em português a perguntas sobre dados reais de u
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
+python data/build_db.py        # baixa o dataset (kagglehub) e monta data/olist.db
 ```
 
 O LLM roda localmente no [Ollama](https://ollama.com/download), sem custo de API:
@@ -17,7 +29,15 @@ ollama pull qwen2.5-coder:7b
 python -m agent.sql_agent "Quantos pedidos foram cancelados?"
 ```
 
-Configuração no `.env` (ou no ambiente): `OLLAMA_MODEL`, `OLLAMA_HOST`, `OLLAMA_NUM_CTX`, `AGENT_VERSION`, `MAX_ATTEMPTS`.
+Configuração no `.env` (ou no ambiente):
+
+| Variável | Padrão | Uso |
+|---|---|---|
+| `OLLAMA_MODEL` | `qwen2.5-coder:7b` | modelo usado |
+| `OLLAMA_HOST` | `http://localhost:11434` | endereço do Ollama |
+| `OLLAMA_NUM_CTX` | `8192` | janela de contexto |
+| `AGENT_VERSION` | `v3` | versão do agente (`v1` a `v6`) |
+| `MAX_ATTEMPTS` | `3` | máximo de gerações por pergunta |
 
 ## Demo
 
@@ -25,103 +45,130 @@ Configuração no `.env` (ou no ambiente): `OLLAMA_MODEL`, `OLLAMA_HOST`, `OLLAM
 streamlit run app.py
 ```
 
-Interface em Streamlit sobre `answer()`: a pergunta vira SQL, a SQL roda no banco somente leitura e o modelo responde em português. Para cada resposta, a demo mostra a SQL usada, a tabela de resultado, um gráfico quando o resultado é rótulo + número, e as tentativas, a latência e os tokens. Na barra lateral dá para trocar a versão do agente (v1 a v6) e o modelo instalado no Ollama, e há perguntas de exemplo do conjunto de avaliação, incluindo uma que o 7B não resolve.
+Interface em Streamlit sobre `answer()`: a pergunta vira SQL, a SQL roda no banco somente leitura e o modelo responde em português. Para cada resposta, a demo mostra a SQL usada (expansível), a tabela de resultado, um gráfico quando o resultado é rótulo + número, e as tentativas, a latência e os tokens. Na barra lateral dá para trocar a versão do agente (v1 a v6) e o modelo instalado no Ollama, e há perguntas de exemplo do conjunto de avaliação, incluindo uma que o 7B não resolve.
 
-<!-- GIF: docs/demo.gif -->
+![Demo do SQLChef em Streamlit](docs/demo.gif)
 
-## Arquitetura
+## Como o agente funciona
 
-Grafo LangGraph em `agent/sql_agent.py`: **gerar** (LLM recebe schema e pergunta) → **executar** (`agent/db.py`: conexão SQLite somente leitura, só um `SELECT`, timeout) → se der erro ou resultado vazio (na v5, também resultado com formato suspeito), **corrigir** (o problema volta ao LLM) e gerar de novo, até `MAX_ATTEMPTS`. Na v6, quando a SQL roda, um nó de **revisão** confere pergunta, SQL e resultado antes de terminar.
+### Os dados
 
-Seis versões para comparação, cada uma acumulando as anteriores:
+`data/build_db.py` monta `data/olist.db` a partir dos CSVs públicos da Olist, com sete tabelas: `customers`, `sellers`, `products`, `orders`, `order_items`, `order_payments` e `order_reviews`. Pequenos ajustes em relação aos CSVs: colunas com erro de grafia renomeadas, a tradução das categorias para inglês incorporada a `products`, strings vazias viram `NULL`, datas ficam como texto `AAAA-MM-DD HH:MM:SS`, e a tabela de geolocalização (1 milhão de linhas) não é carregada. O banco e os CSVs ficam fora do git por causa da licença do dataset.
+
+O schema tem armadilhas de propósito deixadas como estão, porque são o que torna as perguntas difíceis: um pedido pode ter vários itens, vários pagamentos e várias avaliações; o cliente real é `customer_unique_id` (o `customer_id` muda a cada pedido); e `order_item_id` é a posição do item no pedido, não uma quantidade.
+
+### O fluxo
+
+O agente é um grafo [LangGraph](https://www.langchain.com/langgraph) em `agent/sql_agent.py`:
+
+```
+ pergunta ─▶ gerar ─▶ executar ─┬─ erro / vazio / formato suspeito ─▶ corrigir ─▶ gerar (até MAX_ATTEMPTS)
+                                ├─ (v6) SQL roda ─▶ revisar ─┬─ problema ─▶ corrigir ─▶ gerar
+                                │                            └─ OK ─┐
+                                └─ resultado aceito ───────────────┴─▶ finalizar ─▶ resposta
+```
+
+1. **Gerar.** O LLM recebe um prompt de sistema com as regras, o `CREATE TABLE` de cada tabela com três linhas de exemplo e, conforme a versão, exemplos few-shot e notas sobre o schema. Responde só com a consulta, dentro de um bloco ```` ```sql ````.
+2. **Executar.** A SQL passa por `agent/db.py`, que aceita um único `SELECT` (ou `WITH ... SELECT`), abre o SQLite em modo somente leitura (`mode=ro` e `PRAGMA query_only`) e aborta consultas que passam de 10 s. A validação do texto é uma defesa em profundidade; a proteção de verdade é a conexão somente leitura. O agente corta o resultado em 50 linhas.
+3. **Corrigir.** Se a execução deu erro, devolveu zero linhas ou só `NULL`, o problema volta ao LLM como nova mensagem da conversa, e ele escreve outra consulta. O limite padrão é de 3 gerações por pergunta.
+4. **Responder.** Na demo, uma última chamada redige em português a resposta a partir do resultado. A SQL usada sempre é mostrada. A avaliação só usa a SQL gerada.
+
+`agent/llm.py` isola o cliente do Ollama (temperatura 0, `num_ctx` configurável) e registra os tokens de cada chamada; trocar de modelo é só mudar `OLLAMA_MODEL`.
+
+### As seis versões
+
+Cada versão acumula as anteriores, para medir o efeito de cada técnica separadamente:
 
 | Versão | O que muda |
 |---|---|
 | `v1` | uma chamada, sem exemplos |
-| `v2` | + exemplos few-shot (diferentes das perguntas de teste) |
-| `v3` | + autocorreção com retry |
-| `v4` | + dica de schema na correção: se a coluna não existe, diz em quais tabelas ela está e mostra as colunas delas |
-| `v5` | + notas de semântica do schema no prompt (o que identifica cada linha, onde há várias linhas por pedido, que `order_item_id` é posição e não quantidade, divisão inteira) + checagem de formato: se a pergunta pede um único valor ("Quantos...") e voltaram várias linhas, o resultado vai para a correção mesmo sem erro |
-| `v6` | + revisão: com a SQL rodando, o LLM, em um contexto separado do gerador, recebe a pergunta, a SQL e as primeiras linhas do resultado e responde `OK` ou `PROBLEMA: ...` seguindo uma lista de verificação (condições, entidade contada, nível de agregação, formato, plausibilidade). Um problema vai para a correção. Há uma revisão por pergunta, e se a SQL revisada falhar o agente volta ao resultado anterior |
+| `v2` | + 7 exemplos few-shot (nenhum repete uma pergunta de teste) |
+| `v3` | + autocorreção com retry: erro de execução ou resultado vazio volta ao LLM, até `MAX_ATTEMPTS` |
+| `v4` | + dica de schema na correção: se a coluna não existe, a mensagem diz em quais tabelas ela está e mostra as colunas delas |
+| `v5` | + notas de semântica do schema no prompt (o que identifica cada linha, onde há várias linhas por pedido, que `order_item_id` é posição e não quantidade, divisão inteira no SQLite) + checagem de formato: se a pergunta pede um único valor ("Quantos...") e voltaram várias linhas, o resultado vai para a correção mesmo sem erro |
+| `v6` | + revisão: com a SQL rodando, o LLM, em um contexto separado do gerador, recebe a pergunta, a SQL e as primeiras linhas do resultado e responde `OK` ou `PROBLEMA: ...` seguindo uma lista de verificação (condições, entidade contada, nível de agregação, formato, plausibilidade). Um problema vai para a correção, com uma geração extra além de `MAX_ATTEMPTS`. Há uma revisão por pergunta, e se a SQL revisada falhar o agente volta ao resultado anterior |
 
-`agent/llm.py` isola o cliente do Ollama e registra os tokens de cada chamada; trocar de modelo é só mudar `OLLAMA_MODEL`.
+## Experimentos
 
-## Avaliação
+### Método
 
-**Métrica: execution accuracy.** A SQL gerada e a SQL de referência são executadas no banco, e a resposta conta como certa se as duas devolvem o mesmo resultado. Não há LLM avaliando LLM.
-
-Regras de comparação (`eval/run_eval.py`):
+**Métrica: execution accuracy.** A SQL gerada e a SQL de referência são executadas no banco, e a resposta conta como certa se as duas devolvem o mesmo resultado. Regras de comparação (`eval/run_eval.py`):
 - nomes de colunas são ignorados;
 - floats são arredondados a 2 casas;
 - a ordem das linhas só importa nas perguntas marcadas `ordered` (rankings); nas demais, as linhas são comparadas como conjunto;
 - a ordem das colunas só importa nas perguntas marcadas `strict_columns`;
 - colunas a mais ou a menos contam como erro, porque a pergunta diz o que retornar.
 
-**Conjunto de teste:** 100 perguntas em português (25 fáceis, 45 médias, 30 difíceis) em `eval/questions.json`, cada uma com a SQL de referência, em quatro lotes:
-- **Lote 1 (q01–q22):** usado para desenvolver as versões v2–v4.
-- **Lote 2 (q23–q60):** escrito só a partir do schema, sem ver respostas do modelo. Serve para checar se as melhorias valem para perguntas que não influenciaram o desenvolvimento. Depois foi inspecionado para a análise de erros que originou a v5.
-- **Lote 3 (q61–q80):** escrito antes de rodar a v5, para medi-la em perguntas que ela não viu.
-- **Lote 4 (q81–q100):** escrito antes de implementar a v6, com conceitos que os outros lotes quase não cobrem e redações variadas: negação e anti-join ("nunca receberam avaliação"), hora do dia (comparar texto com número dá zero), pivô com `CASE`, comparação com a média geral, `LIKE`, ranking por grupo e `LAG` (funções de janela), comparação entre períodos, `EXCEPT`, e pistas que puxam para a coluna errada ("quantidade total de itens" sugere `SUM(order_item_id)`).
+**Ambiente:** Ollama local com temperatura 0, GPU AMD Radeon (Navi 33, ~8 GB de VRAM), 15 GB de RAM. Modelos: `qwen2.5-coder:7b` e `qwen2.5-coder:14b`.
 
-Os exemplos few-shot não repetem nenhuma pergunta de teste.
+**Conjunto de teste:** 100 perguntas em português (25 fáceis, 45 médias, 30 difíceis) em `eval/questions.json`, cada uma com a SQL de referência. As 100 referências rodam e não vêm vazias (`--validate-gold`). As perguntas cobrem contagens e filtros simples, junções entre tabelas, agregações por grupo, médias por pedido, datas, negação e anti-join, pivô com `CASE`, funções de janela (`ROW_NUMBER`, `LAG`), `EXCEPT` e comparação entre períodos. Algumas foram redigidas com pistas que puxam para a coluna errada ("quantidade total de itens" sugere `SUM(order_item_id)`). Os exemplos few-shot não repetem nenhuma pergunta de teste.
 
 ```bash
-python eval/run_eval.py --validate-gold                     # as 100 SQLs de referência rodam e não vêm vazias
+python eval/run_eval.py --validate-gold
 python eval/run_eval.py --agent agent.sql_agent:generate_sql_v6 --label qwen7b_v6_100
 OLLAMA_MODEL=qwen2.5-coder:14b python eval/run_eval.py --agent agent.sql_agent:generate_sql_v6 --label qwen14b_v6_100
-python eval/run_eval.py --agent agent.sql_agent:generate_sql_v5 --lote 4 --label qwen7b_v5_l4
-python eval/review_stats.py eval/results/qwen7b_v6_100.csv  # o que o revisor salvou, estragou ou não mudou
+python eval/review_stats.py eval/results/qwen7b_v6_100.csv   # o que o revisor salvou, estragou ou não mudou
 ```
 
-Resultados em `eval/results/<label>.csv` (por pergunta: acerto, SQL gerada, tentativas, tokens, latência) e `<label>_summary.json` (acurácia por dificuldade e por lote, e a configuração da rodada).
+Resultados em `eval/results/<label>.csv` (por pergunta: acerto, SQL gerada, tentativas, tokens, latência) e `<label>_summary.json` (acurácia por dificuldade e a configuração da rodada).
 
-## Resultados
+### Resultados
 
-Ollama local com temperatura 0, GPU AMD Radeon (Navi 33, ~8 GB de VRAM). As colunas Fácil, Média e Difícil se referem aos lotes 1+2 (16, 28 e 16 perguntas); o lote 3 tem 5 fáceis, 9 médias e 6 difíceis, e o lote 4, 4 fáceis, 8 médias e 8 difíceis. Latência e tokens são médias por pergunta nos lotes 1 a 3.
+Acertos por dificuldade nas 100 perguntas, com latência e tokens médios por pergunta. Cada pergunta foi rodada uma vez por configuração.
 
-| Modelo | Versão | Lotes 1+2 (60) | Fácil | Média | Difícil | Lote 3 (20) | Lote 4 (20) | Latência | Tokens |
-|---|---|---|---|---|---|---|---|---|---|
-| qwen2.5-coder:7b | v1 | 44/60 (73,3%) | 16/16 | 23/28 | 5/16 | 11/20 | 13/20 | 1,1 s | 1.481 |
-| qwen2.5-coder:7b | v2 | 46/60 (76,7%) | 16/16 | 25/28 | 5/16 | 12/20 | 12/20 | 1,0 s | 1.975 |
-| qwen2.5-coder:7b | v3 | 49/60 (81,7%) | 16/16 | 27/28 | 6/16 | 12/20 | 12/20 | 1,4 s | 2.439 |
-| qwen2.5-coder:7b | v4 | 49/60 (81,7%) | 16/16 | 27/28 | 6/16 | 13/20 | 12/20 | 1,4 s | 2.390 |
-| qwen2.5-coder:7b | v5 | 51/60 (85,0%) | 16/16 | 27/28 | 8/16 | 14/20 | 11/20 | 1,3 s | 2.825 |
-| qwen2.5-coder:7b | v6 | 51/60 (85,0%) | 16/16 | 27/28 | 8/16 | 14/20 | 11/20 | 2,0 s | 5.031 |
-| qwen2.5-coder:14b | v1 | 48/60 (80,0%) | 16/16 | 27/28 | 5/16 | 12/20 | – | 6,6 s | 1.483 |
-| qwen2.5-coder:14b | v2 | 52/60 (86,7%) | 16/16 | 27/28 | 9/16 | 14/20 | – | 6,2 s | 1.976 |
-| qwen2.5-coder:14b | v3 | 52/60 (86,7%) | 16/16 | 27/28 | 9/16 | 15/20 | – | 7,4 s | 2.115 |
-| qwen2.5-coder:14b | v4 | 52/60 (86,7%) | 16/16 | 27/28 | 9/16 | 15/20 | – | 7,7 s | 2.092 |
-| qwen2.5-coder:14b | **v5** | **55/60 (91,7%)** | 16/16 | 27/28 | **12/16** | **19/20** | – | 5,8 s | 2.306 |
-| qwen2.5-coder:14b | v6 | – | | | | – | – | | |
+| Modelo | Versão | Fácil (25) | Média (45) | Difícil (30) | Total (100) | Latência | Tokens |
+|---|---|---|---|---|---|---|---|
+| qwen2.5-coder:7b | v1 | 24/25 | 37/45 | 7/30 | 68/100 (68,0%) | 1,2 s | 1.485 |
+| qwen2.5-coder:7b | v2 | 24/25 | 40/45 | 6/30 | 70/100 (70,0%) | 1,1 s | 1.979 |
+| qwen2.5-coder:7b | v3 | 24/25 | 42/45 | 7/30 | 73/100 (73,0%) | 1,4 s | 2.420 |
+| qwen2.5-coder:7b | v4 | 24/25 | 43/45 | 7/30 | 74/100 (74,0%) | 1,7 s | 2.407 |
+| qwen2.5-coder:7b | v5 | 24/25 | 43/45 | 9/30 | 76/100 (76,0%) | 1,7 s | 2.903 |
+| qwen2.5-coder:7b | v6 | 24/25 | 43/45 | 9/30 | 76/100 (76,0%) | 2,5 s | 5.113 |
+| qwen2.5-coder:14b | v1 | 25/25 | 41/45 | 10/30 | 76/100 (76,0%) | 7,4 s | 1.489 |
+| qwen2.5-coder:14b | v2 | 25/25 | 42/45 | 14/30 | 81/100 (81,0%) | 6,5 s | 1.980 |
+| qwen2.5-coder:14b | v3 | 25/25 | 43/45 | 14/30 | 82/100 (82,0%) | 6,9 s | 2.138 |
+| qwen2.5-coder:14b | v4 | 25/25 | 43/45 | 15/30 | 83/100 (83,0%) | 6,7 s | 2.096 |
+| qwen2.5-coder:14b | v5 | 25/25 | 43/45 | 23/30 | 91/100 (91,0%) | 7,2 s | 2.363 |
+| qwen2.5-coder:14b | v6 | 25/25 | 43/45 | 25/30 | 93/100 (93,0%) | 8,2 s | 4.417 |
 
-Lotes 1 a 3 de v1 a v5 vêm das rodadas com 80 perguntas (`qwen{7b,14b}_v*_80`); o lote 4 de v1 a v5, de rodadas só com ele (`*_l4`); a v6, de uma rodada com as 100 (`*_v6_100`). Falta rodar o 14B no lote 4 e na v6.
+## Análise dos resultados
 
-O que os números mostram:
-- **Exemplos e autocorreção ajudam, inclusive em perguntas inéditas.** No 7B, de v1 para v3 são 5 acertos a mais nos lotes 1+2, quase todos nas perguntas médias (de 23 para 27 de 28); as fáceis já estavam no máximo.
-- **No 7B, as técnicas de v2 a v4 quase não mexem nas difíceis** (de 5 para 6 de 16). A correção só reage quando a SQL dá erro ou volta vazia, e quase todas as falhas das difíceis rodam sem erro e devolvem um número errado (ver abaixo).
-- **No 14B, o few-shot é que faz a diferença:** de v1 para v2 as difíceis vão de 5 para 9 de 16, e a autocorreção e a dica de schema não somam nada depois disso. O 14B precisa bem menos de correção, por isso usa menos tokens, mas a latência é cerca de 5 vezes maior.
-- **A v5 é a primeira técnica que melhora as difíceis nos dois modelos:** de 6 para 8 de 16 no 7B e de 9 para 12 de 16 no 14B (lotes 1+2). Nos lotes 1+2, o 7B com a v5 chega perto do 14B com a v4 (51 contra 52 de 60), com a latência do 7B.
-- **No lote 3, que a v5 não viu, o resultado depende do modelo.** O 14B vai de 15 para 19 de 20, sem perder nenhuma pergunta; o 7B vai só de 13 para 14. O ganho nas perguntas inéditas mostra que as notas não estão apenas decoradas para as falhas dos lotes 1 e 2, mas o 7B aproveita bem menos delas.
-- **No 14B, o ganho vem das notas, não da checagem.** Só uma pergunta passou por nova tentativa na v5 (contra três na v4); todas as perguntas recuperadas acertam já na primeira geração. Por isso a v5 é até mais rápida que a v4 no 14B. As notas acrescentam ~400 tokens ao prompt.
-- Com 20 perguntas, cada uma vale 5 pontos percentuais no lote 3, então o número é indicativo, não conclusivo.
-- **No lote 4, as técnicas não ajudam o 7B:** ele acerta 13 de 20 na v1 e 11 na v5. A diferença está em duas perguntas difíceis: na q96 a v5 passou a contar avaliações em vez de pedidos, e na q100 escreveu `strftime('%Y-%m')` sem a coluna de data. As 7 perguntas que nenhuma versão acerta usam conceitos novos: ranking por grupo (q93), comparação entre períodos (q94), primeira e última compra do cliente (q95), `EXCEPT` (q97), JOIN que duplica valores (q98), `HAVING` com dois critérios (q99) e a armadilha de `order_item_id` (q90).
-- **No 7B, a revisão (v6) não mudou nenhum acerto** e custa +0,7 s e quase o dobro de tokens por pergunta (ver "O que a v6 mudou").
+### O que cada técnica trouxe
 
-## Análise de erros
+Perguntas ganhas e perdidas em relação à versão anterior:
 
-Falhas restantes na v3, por tipo:
+| Passo | 7B | 14B |
+|---|---|---|
+| v1 → v2 (few-shot) | +5, −3 | +8, −3 |
+| v2 → v3 (autocorreção) | +3 | +1 |
+| v3 → v4 (dica de schema) | +1 | +1 |
+| v4 → v5 (notas + checagem de formato) | +4, −2 | +8 |
+| v5 → v6 (revisor) | 0 | +2 |
+
+- **Fáceis e médias saturam cedo.** O 14B acerta as 25 fáceis desde a v1, e os dois modelos chegam a 43 de 45 médias na v3 ou na v4. A partir daí, toda a diferença está nas difíceis.
+- **Few-shot troca acertos.** Ele resolve perguntas novas, mas quebra outras que a v1 acertava (3 em cada modelo). No 14B é o maior ganho até a v4 (+5 no saldo); no 7B o saldo é de só +2.
+- **A autocorreção ajuda pouco porque quase não é usada.** Na v3, só 14 perguntas do 7B e 4 do 14B passaram por uma segunda tentativa. Ela resolve o que o banco reporta (coluna inexistente, sintaxe, resultado vazio), e esse não é o erro que sobra. A dica de schema da v4 soma uma pergunta em cada modelo.
+- **A v5 é a técnica que mais melhora as difíceis:** de 15 para 23 de 30 no 14B, sem perder nenhuma pergunta. No 7B, de 7 para 9, ganhando 4 e perdendo 2.
+- **A v6 dá pouco e depende do modelo:** +2 no 14B, zero no 7B, e quase dobra os tokens.
+- **O tamanho do modelo pesa tanto quanto as técnicas.** O 14B com a v1 empata com o 7B com a v5 (76/100). Mas o 7B responde em ~1 a 2,5 s por pergunta (mediana abaixo de 1,3 s), e o 14B em ~6,5 a 8 s. E as técnicas rendem muito mais no modelo maior: nas difíceis, o 14B vai de 10 para 25 de 30, e o 7B, de 7 para 9.
+- **O que nenhuma versão resolve:** 20 perguntas o 7B não acerta em nenhuma versão; no 14B são só 5 (q19, q54, q57, q77, q90).
+
+### Erros de SQL versus erros silenciosos
+
+Quase todas as falhas que sobram são **erros silenciosos**: a SQL roda e devolve um resultado plausível, mas responde outra pergunta. Falhas da v6 nas 100 perguntas, por tipo:
 
 | Tipo de erro | Exemplo | 7B | 14B |
 |---|---|---|---|
-| Contar grupos sem subconsulta: `GROUP BY ... HAVING` com `COUNT` devolve uma linha por grupo em vez do total | "Quantos pedidos têm itens de mais de um vendedor?" (q22) | 2 | 2 |
-| Média ou soma no nível errado: média por linha de pagamento em vez do total por pedido, ou JOIN que repete valores | "Qual estado tem o maior ticket médio?" (q57) | 2 | 2 |
-| Confusão de schema: usa em `orders` uma coluna que está em `customers`, ou troca `customer_unique_id` (cliente real) por `customer_id` (muda a cada pedido) | "Quantos clientes únicos fizeram mais de um pedido?" (q19) | 2 | 2 |
-| `order_item_id` usado como quantidade de itens (a coluna é a posição do item no pedido) | "Qual a quantidade média de itens por pedido?" (q43) | 2 | 1 |
-| Lógica da pergunta lida errado: "tanto em 2017 quanto em 2018" vira `IN ('2017', '2018')`; condição ignorada; filtro no lugar da contagem; formato de resposta errado | q22, q50, q51, q52 | 4 | 0 |
-| Divisão inteira: `COUNT(*) / COUNT(...)` no SQLite descarta as casas decimais | q43 (14B) | 0 | 1 |
-| **Total** | | **12** | **8** |
+| Leitura errada da pergunta: condição ignorada, "tanto em 2017 quanto em 2018" vira `IN ('2017', '2018')`, entidade contada errada (itens no lugar de pedidos, avaliações no lugar de pedidos), formato de resposta errado | "Quantos pedidos têm exatamente 3 itens?" (q76) | 9 | 1 |
+| Agregação no nível errado: contar grupos sem subconsulta, média por linha de pagamento em vez do total por pedido, JOIN que repete valores | "Qual estado tem o maior ticket médio?" (q57) | 5 | 3 |
+| `order_item_id` usado como quantidade de itens (a coluna é a posição do item no pedido) | "Qual a quantidade média de itens por pedido?" (q43) | 3 | 1 |
+| Identificador do cliente: `customer_id` (muda a cada pedido) no lugar de `customer_unique_id` (cliente real), ou falta de `DISTINCT` | "Quantos clientes únicos são do RS?" (q65) | 2 | 1 |
+| Funções de janela: ranking por grupo e `LAG` | "Qual a segunda categoria mais vendida em cada estado?" (q93) | 2 | 0 |
+| Divisão inteira: no SQLite, inteiro dividido por inteiro descarta as casas decimais | "Qual foi o crescimento percentual de pedidos entre 2017 e 2018?" (q94) | 1 | 1 |
+| SQL que não roda depois das tentativas (coluna inexistente, timeout) | q59, q97 | 2 | 0 |
+| **Total** | | **24** | **7** |
 
-Exemplo de erro ao contar grupos (q22, gerada pelo 14B):
+Exemplo de erro ao contar grupos (q22), um dos erros silenciosos mais comuns antes da v5:
 
 ```sql
 -- gerada: devolve uma linha "1" para cada pedido que atende à condição
@@ -135,45 +182,23 @@ SELECT COUNT(*) FROM (
 )
 ```
 
-O que fica de lição:
-1. **A maioria das falhas restantes são erros silenciosos:** a SQL roda e devolve um resultado plausível. Uma autocorreção baseada em erro de execução não tem como pegá-los. O próximo passo natural é checar o resultado, e não só a execução. Foi o que a v5 fez (abaixo).
-2. **Agregação é o ponto fraco nos dois tamanhos de modelo.** O 14B corrige os erros de leitura da pergunta, mas os erros de contar grupos e de nível de agregação continuam.
-3. **A confusão de schema resiste à correção:** mesmo com a mensagem de erro e a dica de schema, o modelo volta a usar a coluna na tabela errada ou troca o identificador do cliente.
-
 ### O que a v5 mudou
 
-A v5 ataca as duas causas acima sem chamada extra ao LLM:
-- **Notas de semântica do schema.** O `CREATE TABLE` mostra nomes e tipos, mas não diz que um pedido pode ter vários pagamentos, que estado e `customer_unique_id` só existem em `customers`, nem que `order_item_id` é posição. As notas dizem isso em oito linhas gerais, sem citar perguntas do teste.
-- **Checagem de formato do resultado.** Se a pergunta começa com "Quantos" (sem "cada") ou o resultado é uma coluna numérica vinda de um `GROUP BY`, e voltaram várias linhas, o resultado vai para a correção com a instrução de envolver o `GROUP BY` em uma subconsulta. A regra não marca nenhuma das 80 respostas de referência.
+A v5 ataca os erros silenciosos sem chamada extra ao LLM:
+- **Notas de semântica do schema.** O `CREATE TABLE` mostra nomes e tipos, mas não diz que um pedido pode ter vários pagamentos, que estado e `customer_unique_id` só existem em `customers`, nem que `order_item_id` é posição. As notas dizem isso em poucas linhas gerais, sem citar perguntas do teste.
+- **Checagem de formato do resultado.** Se a pergunta começa com "Quantos" (sem "cada") ou o resultado é uma coluna numérica vinda de um `GROUP BY`, e voltaram várias linhas, o resultado vai para a correção com a instrução de envolver o `GROUP BY` em uma subconsulta. A regra não marca nenhuma das respostas de referência.
 
-**14B, em relação à v4:** ganhou sete perguntas e não perdeu nenhuma. Cinco são de contar grupos (q22, q60, q75, q76, q78), resolvidas já na primeira geração pela nota "envolva o `GROUP BY ... HAVING` em uma subconsulta". Na q76 a v4 usava `order_item_id = 3`; a v5 conta os itens com `COUNT(*)`, como diz a nota. Na q80 o frete passou a ser somado por pedido em uma subconsulta antes do JOIN, também como a nota pede. Na q50 a v4 errava nas três tentativas ao usar um alias fora da subconsulta; a v5 escreve outra consulta que roda, e não dá para atribuir o acerto a uma nota específica.
+**No 14B**, a v5 ganhou oito perguntas e não perdeu nenhuma. Cinco são de contar grupos (q22, q60, q75, q76, q78), resolvidas já na primeira geração pela nota "envolva o `GROUP BY ... HAVING` em uma subconsulta". Na q80 o frete passou a ser somado por pedido em uma subconsulta antes do JOIN, como a nota pede. O ganho vem das notas, não da checagem: só 2 perguntas passaram por nova tentativa na v5 (contra 4 na v4). As notas acrescentam ~400 tokens ao prompt.
 
-As notas que tratam de granularidade foram ignoradas mesmo pelo 14B. Ele continua errando:
-- q43: divisão inteira, mesmo com a nota sobre `1.0 *`;
-- q56: `order_item_id` usado como quantidade de itens;
-- q57 e q77: média por linha de pagamento em vez do total por pedido;
-- q54: JOIN de itens com pagamentos que duplica as somas.
+**No 7B**, ganhou q17 e q19 (as notas resolvem a ligação com `customers`), q60 e q75 (a checagem de formato pega a contagem de grupos e o modelo corrige), e perdeu q51 e q100. A q51 oscila entre rodadas também nas versões anteriores (ver Limitações).
 
-Ou seja, as notas funcionaram quando dizem qual padrão de SQL usar (subconsulta com `HAVING`, `COUNT(*)` para itens, somar por pedido antes de juntar) e foram ignoradas quando o modelo precisa perceber sozinho que está no nível de agregação errado.
+**As notas funcionaram quando dizem qual padrão de SQL usar** (subconsulta com `HAVING`, `COUNT(*)` para itens, somar por pedido antes de juntar) **e foram ignoradas quando o modelo precisa perceber sozinho que está no nível de agregação errado.** Mesmo o 14B continua errando a divisão inteira (q43, apesar da nota), a média por linha de pagamento (q57, q77) e o JOIN de itens com pagamentos que duplica as somas (q54). No 7B, a maior parte das falhas é de leitura da pergunta, que as notas não cobrem: o modelo responde uma pergunta parecida com a feita.
 
-**7B, em relação à v4:** ganhou q17 e q19 (as notas resolvem a ligação com `customers`), q60 e q75 (a checagem de formato pega a contagem de grupos e o modelo corrige). Perdeu q51, mas essa pergunta oscila entre rodadas também na v3 e na v4 (ver Limitações).
+### O que a v6 mudou (o revisor)
 
-Falhas do 7B na v5 no lote 3 (6 de 20), quase todas de leitura da pergunta, que as notas não cobrem. O 14B erra só a q77:
+A v6 testa se o próprio modelo consegue pegar os erros silenciosos que sobram, revisando a SQL e o resultado contra a pergunta.
 
-| Pergunta | O que o modelo fez |
-|---|---|
-| q65 "Quantos clientes únicos são do RS?" | `COUNT(customer_unique_id)` sem `DISTINCT` (falha em todas as versões) |
-| q76 "Quantos pedidos têm exatamente 3 itens?" | contou os itens desses pedidos, não os pedidos |
-| q77 valor médio pago em pedidos com avaliação nota 1 | JOIN com avaliações e média em função de janela, sem agregar por pedido |
-| q78 categorias com pelo menos 1000 itens vendidos | contou produtos cadastrados, não itens vendidos |
-| q79 percentual de clientes com mais de um pedido | ignorou "mais de um pedido" e devolveu 100% |
-| q80 tempo de entrega quando o frete passa de 100 reais | ignorou a condição do frete |
-
-No 7B, os erros de q76 a q80 mostram o limite de corrigir com regras: o modelo responde uma pergunta parecida com a feita. Pegar isso, e os erros de granularidade que sobram no 14B, exigiria comparar a SQL com a pergunta, por exemplo pedindo ao LLM que revise a consulta e o resultado antes de responder.
-
-### O que a v6 mudou
-
-A v6 testa se o próprio modelo consegue pegar os erros silenciosos que sobram, revisando a SQL e o resultado contra a pergunta. Efeito do revisor no 7B, medido com `eval/review_stats.py`:
+**No 7B**, medido com `eval/review_stats.py`:
 
 | Revisor (7B, 100 perguntas) | Perguntas |
 |---|---|
@@ -184,16 +209,22 @@ A v6 testa se o próprio modelo consegue pegar os erros silenciosos que sobram, 
 | Resposta errada que ele aprovou | 12 |
 | Resposta errada sem revisão (a SQL dava erro ou voltava vazia) | 3 |
 
-- **Quando o revisor aponta um problema, ele acerta.** As 9 respostas que ele marcou estavam todas erradas, e as descrições batem com o erro real. Exemplos: "não verifica se os clientes fizeram pedidos tanto em 2017 quanto em 2018" (q50), "calcula o tempo médio de SP em vez da diferença" (q52), "não considera os meses de janeiro a agosto" (q94).
+- **Quando o revisor aponta um problema, ele acerta.** As 9 respostas marcadas estavam todas erradas, e as descrições batem com o erro real ("não verifica se os clientes fizeram pedidos tanto em 2017 quanto em 2018", q50; "não considera os meses de janeiro a agosto", q94).
 - **Mas o 7B não consegue corrigir o que o revisor apontou.** Nenhuma das 9 virou acerto. Em uma (q51) a SQL corrigida falhou e o agente voltou à anterior.
-- **E ele aprova a maioria dos erros**, inclusive os que as notas descrevem: `SUM(order_item_id)` como quantidade de itens (q90) e o JOIN de itens com pagamentos que duplica a receita (q98).
-- **Custo:** uma chamada a mais por pergunta, com o schema e as notas no prompt do revisor: +0,7 s e de ~2.800 para ~5.000 tokens por pergunta no 7B.
+- **E ele aprova a maioria dos erros**, inclusive os que as notas descrevem: `SUM(order_item_id)` como quantidade (q90) e o JOIN que duplica a receita (q98).
+- **Custo:** uma chamada a mais por pergunta, com o schema e as notas no prompt do revisor: +0,8 s e de ~2.900 para ~5.100 tokens por pergunta. Para o 7B, a revisão não compensa: ela sabe diagnosticar alguns erros, mas o mesmo modelo não sabe consertá-los.
 
-Para o 7B, a revisão não compensa: ela sabe diagnosticar alguns erros, mas o mesmo modelo não sabe consertá-los.
+**No 14B**, a revisão salvou 2 perguntas (q56 e q98) e não estragou nenhuma. O revisor apontou problema em só 4 das 100 respostas: 2 salvas e 2 que não ajudaram (q77 e q96, que continuam erradas), ou seja, sem falsos alarmes. O total vai de 91 para 93, ao custo de quase o dobro de tokens (2.363 → 4.417). Com 2 perguntas de diferença, é um resultado indicativo, não conclusivo.
 
 ## Limitações
 
-- **80 perguntas é pouco.** Nos lotes 1+2 cada pergunta vale 1,7 ponto percentual, e no lote 3, 5 pontos. Diferenças de uma ou duas perguntas entre versões não são conclusivas.
-- **Temperatura 0 não garante resultado idêntico.** Repetir v1 a v4 nas 60 perguntas antigas deu os mesmos acertos no 14B; no 7B mudou uma pergunta (a q51, de errada para certa na v3 e na v4). Uma rodada por configuração não mede essa variação.
-- **Os lotes 1 e 2 já foram inspecionados.** As notas da v5 foram escritas a partir dessas falhas, por isso o número que conta para a v5 é o do lote 3, e o da v6 é o do lote 4. Os lotes 3 e 4 agora também foram inspecionados; uma técnica nova precisaria de perguntas novas.
-- **Perguntas, notas e revisor foram escritos pela mesma pessoa.** Mesmo escrevendo cada lote antes de rodar a versão nova, quem escreve as perguntas sabe quais armadilhas o agente conhece.
+- **100 perguntas é pouco.** Cada pergunta vale 1 ponto percentual. Diferenças de uma ou duas perguntas entre versões (por exemplo, a v6 contra a v5 no 14B) não são conclusivas.
+- **Temperatura 0 não garante resultado idêntico.** Em rodadas repetidas, o 14B deu os mesmos acertos; no 7B uma pergunta (a q51) oscila entre certa e errada. Cada configuração foi rodada uma vez, então essa variação não está medida.
+- **O conjunto não é inédito para as técnicas.** As notas da v5 e a lista de verificação do revisor foram escritas depois de ver as falhas das versões anteriores em parte destas perguntas. Uma técnica nova precisaria ser medida em perguntas novas.
+- **Perguntas, notas e revisor foram escritos pela mesma pessoa.** Quem escreve as perguntas sabe quais armadilhas o agente conhece.
+- **Erros silenciosos continuam sendo o ponto fraco.** O agente corrige o que o banco reporta, mas não sabe, sozinho, que uma SQL que roda está respondendo outra pergunta. As regras da v5 e o revisor da v6 pegam só parte deles; sobram principalmente os de granularidade (média por linha de pagamento, JOIN que duplica valores) e, no 7B, os de leitura da pergunta.
+- **O revisor é do mesmo modelo que o gerador.** No 7B ele diagnostica alguns erros, mas não os conserta e aprova a maioria dos errados; no 14B ele quase não se manifesta. Um revisor mais forte que o gerador não foi testado.
+- **A SQL das respostas certas pode não ser a ideal.** A métrica compara resultados, não a consulta: uma SQL correta por acaso, ou ineficiente, conta como acerto. E a execução tem timeout de 10 s, sem otimização.
+- **Latência do modelo maior.** O 14B leva ~6,5 a 8 s por pergunta em média, com picos de ~47 s nesta máquina, o que pesa para uma demo interativa. Os números de latência não são comparáveis com outra máquina.
+- **Um único banco, um único dialeto e dois modelos da mesma família.** Nada aqui diz como o agente se sai em outro schema, em outro dialeto SQL (por exemplo PostgreSQL) ou com modelos de outras famílias.
+- **A demo não foi publicada.** Ela roda localmente com o Ollama; o deploy ainda não foi feito.
